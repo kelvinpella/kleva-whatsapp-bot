@@ -117,7 +117,8 @@ class SupabaseHandler {
       if (error) throw error;
       if (!products || products.length === 0) return [];
 
-      const results = findSimilarProductsHybrid(pHash, histogram, products, minSimilarity, 0.6);
+      // Use 40% pHash + 60% histogram for better robustness to angle/lighting changes
+      const results = findSimilarProductsHybrid(pHash, histogram, products, minSimilarity, 0.4);
       return results.slice(0, limit);
     } catch (err) {
       console.error('Error searching similar products:', err.message);

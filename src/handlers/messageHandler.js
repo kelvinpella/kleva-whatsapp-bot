@@ -116,7 +116,13 @@ async function handleGroupMessage(msg, db, client) {
           return;
         }
 
-        for (const imgData of processedImages) {
+        // Safety check: Enforce max 2 images per album at save time
+        const imagesToSave = processedImages.slice(0, MAX_IMAGES_PER_MESSAGE);
+        if (processedImages.length > imagesToSave.length) {
+          console.log(`⚠️ Limiting to ${MAX_IMAGES_PER_MESSAGE} images (${processedImages.length} processed, ${processedImages.length - imagesToSave.length} dropped)`);
+        }
+
+        for (const imgData of imagesToSave) {
           try {
             console.log(`💾 Saving image to database (${imgData.groupName})...`);
             await db.insertProduct({
@@ -160,6 +166,12 @@ async function handleGroupMessage(msg, db, client) {
     console.error('Error handling group message:', err.message);
   }
 }
+
+// Track search album batches (similar to group image batching)
+const searchBatchWindow = new Map(); // Tracks if we're in a search batch
+const searchBatchResults = new Map(); // Tracks product UUIDs already returned in batch (for deduplication)
+const searchBatchCount = new Map(); // Tracks number of images processed in batch
+const SEARCH_BATCH_TIMEOUT = 3000; // 3 second window for album images
 
 /**
  * Handle incoming private messages
@@ -211,18 +223,74 @@ async function handlePrivateMessage(msg, db, client) {
       }
     }
 
-    // Phase 3: Image search - requires both /search command AND image
+    // Phase 3: Image search - supports album search
     const hasSearchCommand = msg.body && msg.body.toLowerCase().includes('/search');
     const hasImage = msg.hasMedia;
 
+    // Check if we're in an active search batch (album search)
+    const batchKey = `search_${fromNumber}`;
+    const inSearchBatch = searchBatchWindow.has(batchKey);
+
     if (hasSearchCommand && hasImage) {
-      console.log(`🔍 Image search query from ${fromNumber}`);
+      // First image in album with /search - start batch window
+      console.log(`🔍 Image search query from ${fromNumber} (starting album batch)`);
+
+      // Initialize results tracking for deduplication
+      if (!searchBatchResults.has(batchKey)) {
+        searchBatchResults.set(batchKey, new Set());
+      }
+      const resultsSent = searchBatchResults.get(batchKey);
+
+      // Initialize image counter for this batch
+      if (!searchBatchCount.has(batchKey)) {
+        searchBatchCount.set(batchKey, 0);
+      }
+      const imageNumber = searchBatchCount.get(batchKey) + 1;
+      searchBatchCount.set(batchKey, imageNumber);
+
+      // Mark search batch as active for this user
+      if (searchBatchWindow.has(batchKey)) {
+        clearTimeout(searchBatchWindow.get(batchKey));
+      }
+      const timeout = setTimeout(() => {
+        searchBatchWindow.delete(batchKey);
+        searchBatchResults.delete(batchKey); // Clean up results tracking
+        searchBatchCount.delete(batchKey); // Clean up count tracking
+        console.log(`⏱️ Search batch window closed for ${fromNumber}`);
+      }, SEARCH_BATCH_TIMEOUT);
+      searchBatchWindow.set(batchKey, timeout);
+
+      // Perform search with deduplication and image number
       const { performImageSearch } = require('./searchHandler');
-      await performImageSearch(msg, db, client);
+      await performImageSearch(msg, db, client, resultsSent, imageNumber);
+    } else if (hasImage && !hasSearchCommand && inSearchBatch) {
+      // Subsequent images in album (no caption, but in search batch)
+      console.log(`🔍 Album image ${msg.timestamp} - searching (batch active)`);
+
+      // Get existing results set for deduplication
+      const resultsSent = searchBatchResults.get(batchKey) || new Set();
+
+      // Increment image counter
+      const imageNumber = (searchBatchCount.get(batchKey) || 0) + 1;
+      searchBatchCount.set(batchKey, imageNumber);
+
+      // Extend batch window
+      clearTimeout(searchBatchWindow.get(batchKey));
+      const timeout = setTimeout(() => {
+        searchBatchWindow.delete(batchKey);
+        searchBatchResults.delete(batchKey); // Clean up results tracking
+        searchBatchCount.delete(batchKey); // Clean up count tracking
+        console.log(`⏱️ Search batch window closed for ${fromNumber}`);
+      }, SEARCH_BATCH_TIMEOUT);
+      searchBatchWindow.set(batchKey, timeout);
+
+      // Perform search with deduplication and image number
+      const { performImageSearch } = require('./searchHandler');
+      await performImageSearch(msg, db, client, resultsSent, imageNumber);
     } else if (hasSearchCommand && !hasImage) {
       await msg.reply('❌ Tafadhali tuma picha na amri ya /search ili kutafuta mkoba.');
-    } else if (hasImage && !hasSearchCommand) {
-      // Image without /search command - ignore (don't save, don't search)
+    } else if (hasImage && !hasSearchCommand && !inSearchBatch) {
+      // Image without /search command and not in batch - ignore
       console.log(`📸 Image received without /search command - ignoring`);
     }
   } catch (err) {
