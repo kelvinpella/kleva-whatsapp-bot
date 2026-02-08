@@ -34,7 +34,7 @@ if (!fs.existsSync(IMAGES_DIR)) {
  * @param {Object} db - Database handler instance
  * @returns {Promise<Array>} Array of processed image objects {imagePath, thumbnailPath, metadata}
  */
-async function processGroupImages(message, mediaList, db) {
+async function processGroupImages(message, mediaList, db, groupName = null) {
   const results = [];
 
   // Requirement 1: Only save from supplier groups (verify sender is group)
@@ -131,9 +131,10 @@ async function processGroupImages(message, mediaList, db) {
 
       // Prepare image metadata
       // Requirement 4: Associate with group_id and date_posted
+      const resolvedGroupName = groupName || message.groupMetadata?.subject || 'Unknown Group';
       const imageMetadata = {
         groupId: message.from, // Use message.from (more reliable than groupMetadata?.id)
-        groupName: message.groupMetadata?.subject || 'Unknown Group',
+        groupName: resolvedGroupName,
         imagePath: savedImage.path,
         imageUrl: savedImage.url || null,
         thumbnailPath: savedImage.thumbnailPath || null,
@@ -173,76 +174,46 @@ async function processGroupImages(message, mediaList, db) {
  */
 async function saveImage(imageBuffer, senderId, groupId, db) {
   try {
-    // Create subdirectory by date for organization
     const date = new Date();
     const dateDir = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-    const groupDir = path.join(IMAGES_DIR, dateDir, groupId.replace('@g.us', '').substring(0, 10));
-
-    if (!fs.existsSync(groupDir)) {
-      fs.mkdirSync(groupDir, { recursive: true });
-    }
-
-    // Generate filename: timestamp_hash.jpeg
     const hash = crypto.randomBytes(4).toString('hex');
     const timestamp = Math.floor(Date.now() / 1000);
     const filename = `${timestamp}_${hash}.jpeg`;
-    const filepath = path.join(groupDir, filename);
-
-    // Prepare thumbnail buffer
     const thumbFilename = filename.replace('.jpeg', '_thumb.jpeg');
-    const thumbFilepath = path.join(groupDir, thumbFilename);
     const thumbBuffer = await sharp(imageBuffer)
       .resize(200, 200, { fit: 'cover' })
       .jpeg({ quality: 80 })
       .toBuffer();
 
-    // If a Supabase DB handler with storage helper is provided, attempt upload
+    // Upload to Supabase storage only — no local fallback on error
     if (db && typeof db.uploadBufferToStorage === 'function') {
-      try {
-        const bucket = process.env.SUPABASE_STORAGE_BUCKET || 'images';
-        const groupPrefix = groupId.replace('@g.us', '').substring(0, 10);
-        const storageDir = `images/${dateDir}/${groupPrefix}`;
-        const storagePath = `${storageDir}/${filename}`;
-        const storageThumbPath = `${storageDir}/${thumbFilename}`;
+      const bucket = process.env.SUPABASE_STORAGE_BUCKET || 'images';
+      const groupPrefix = groupId.replace('@g.us', '').substring(0, 10);
+      const storageDir = `images/${dateDir}/${groupPrefix}`;
+      const storagePath = `${storageDir}/${filename}`;
+      const storageThumbPath = `${storageDir}/${thumbFilename}`;
 
-        // Upload original (convert to jpeg buffer first)
-        const originalBuffer = await sharp(imageBuffer).jpeg({ quality: 90, progressive: true }).toBuffer();
-        const origUpload = await db.uploadBufferToStorage(bucket, storagePath, originalBuffer, 'image/jpeg', true);
-        const thumbUpload = await db.uploadBufferToStorage(bucket, storageThumbPath, thumbBuffer, 'image/jpeg', true);
+      const originalBuffer = await sharp(imageBuffer).jpeg({ quality: 90, progressive: true }).toBuffer();
+      const origUpload = await db.uploadBufferToStorage(bucket, storagePath, originalBuffer, 'image/jpeg', true);
+      const thumbUpload = await db.uploadBufferToStorage(bucket, storageThumbPath, thumbBuffer, 'image/jpeg', true);
 
-        if (origUpload && origUpload.url) {
-          return {
-            path: origUpload.path,
-            url: origUpload.url,
-            thumbnailPath: thumbUpload ? thumbUpload.path : null,
-            thumbnailUrl: thumbUpload ? thumbUpload.url : null,
-            filename: filename,
-            timestamp: timestamp
-          };
-        }
-
-        console.warn('Storage upload returned no URL — falling back to local save');
-      } catch (err) {
-        console.warn('Storage upload failed, falling back to local save:', err.message);
-        // continue to local save fallback
+      if (origUpload && origUpload.url) {
+        return {
+          path: origUpload.path,
+          url: origUpload.url,
+          thumbnailPath: thumbUpload ? thumbUpload.path : null,
+          thumbnailUrl: thumbUpload ? thumbUpload.url : null,
+          filename: filename,
+          timestamp: timestamp
+        };
       }
+      console.error('Storage upload failed — image not saved');
+      return null;
     }
 
-    // Save as JPEG with good quality (local fallback)
-    await sharp(imageBuffer)
-      .jpeg({ quality: 90, progressive: true })
-      .toFile(filepath);
-
-    // Save thumbnail locally
-    await sharp(thumbBuffer).toFile(thumbFilepath);
-
-    return {
-      path: filepath,
-      filename: filename,
-      timestamp: timestamp,
-      relativePath: path.relative(IMAGES_DIR, filepath),
-      thumbnailPath: thumbFilepath
-    };
+    // No db/storage configured — do not save locally
+    console.error('No storage configured — image not saved');
+    return null;
   } catch (err) {
     console.error('Error saving image:', err.message);
     return null;
@@ -329,8 +300,9 @@ function shouldProcessMessage(message, supplierGroupIds = []) {
 
   // Check 3: If supplier group IDs are configured, only process those groups
   if (supplierGroupIds.length > 0) {
-    const groupId = message.from; // Use message.from which is the group ID
-    if (!supplierGroupIds.includes(groupId)) {
+    const groupId = (message.from || '').trim();
+    const normalizedIds = supplierGroupIds.map(id => (id || '').trim());
+    if (!normalizedIds.includes(groupId)) {
       return false;
     }
   }

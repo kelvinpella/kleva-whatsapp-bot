@@ -66,8 +66,8 @@ async function handleGroupMessage(msg, db, client) {
         return;
       }
 
-      // Process images with validation
-      const processedImages = await processGroupImages(msg, mediaList, db);
+      // Process images with validation (pass groupName from chat)
+      const processedImages = await processGroupImages(msg, mediaList, db, groupName);
 
       if (processedImages.length === 0) {
         console.log('⏭️  No valid handbag images found in message');
