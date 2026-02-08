@@ -13,6 +13,27 @@ class SupabaseHandler {
     console.log('✓ Supabase client initialized');
   }
 
+  // Upload buffer to Supabase Storage and return public or signed URL
+  async uploadBufferToStorage(bucket, destPath, buffer, contentType = 'image/jpeg', makePublic = true) {
+    try {
+      const { data, error } = await this.supabase.storage.from(bucket).upload(destPath, buffer, { contentType, upsert: false });
+      if (error) throw error;
+
+      if (makePublic) {
+        const { data: publicData, error: urlError } = this.supabase.storage.from(bucket).getPublicUrl(destPath);
+        if (urlError) throw urlError;
+        return { path: destPath, url: publicData.publicUrl };
+      } else {
+        const { data: signedData, error: signErr } = await this.supabase.storage.from(bucket).createSignedUrl(destPath, 60 * 60);
+        if (signErr) throw signErr;
+        return { path: destPath, url: signedData.signedUrl };
+      }
+    } catch (err) {
+      console.error('Storage upload error:', err.message);
+      return null;
+    }
+  }
+
   // ==================== PRODUCTS ====================
 
   async insertProduct(data) {
@@ -24,7 +45,9 @@ class SupabaseHandler {
           group_id: data.groupId,
           group_name: data.groupName,
           image_path: data.imagePath,
+          image_url: data.imageUrl || null,
           thumbnail_path: data.thumbnailPath || null,
+          thumbnail_url: data.thumbnailUrl || null,
           caption: data.caption || null,
           price: data.price || null,
           currency: data.currency || 'TZS',
