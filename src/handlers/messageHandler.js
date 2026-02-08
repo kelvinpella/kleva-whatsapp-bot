@@ -79,21 +79,21 @@ async function handleGroupMessage(msg, db, client) {
       const author = msg.author || msg.from;
 
       await runWithGroupLock(groupId, async () => {
-        if (!tryReserveSlot(groupId, author, msg.timestamp)) {
-          console.log(`\n⏭️ Skipping image (max ${MAX_IMAGES_PER_MESSAGE} per message/album)`);
-          return;
-        }
-
-        console.log(`\n📸 Processing images from ${groupName}...`);
-
-        // Download all media from message
+        // Download media first to check type BEFORE reserving slot
         const mediaList = [];
         try {
           if (msg.hasQuotedMsg) {
             // Handle quoted images if applicable
           } else {
             const media = await msg.downloadMedia();
-            if (media) mediaList.push(media);
+            if (media) {
+              // Check if it's an image (not video) before proceeding
+              if (!media.mimetype || !media.mimetype.startsWith('image/')) {
+                console.log(`\n⏭️ Skipping non-image media (${media.mimetype})`);
+                return; // Don't waste a slot on videos
+              }
+              mediaList.push(media);
+            }
           }
         } catch (err) {
           console.error('Error downloading media:', err.message);
@@ -101,6 +101,14 @@ async function handleGroupMessage(msg, db, client) {
         }
 
         if (mediaList.length === 0) return;
+
+        // Now reserve slot only for valid images
+        if (!tryReserveSlot(groupId, author, msg.timestamp)) {
+          console.log(`\n⏭️ Skipping image (max ${MAX_IMAGES_PER_MESSAGE} per message/album)`);
+          return;
+        }
+
+        console.log(`\n📸 Processing images from ${groupName}...`);
 
         const processedImages = await processGroupImages(msg, mediaList, db, groupName);
         if (processedImages.length === 0) {
@@ -174,10 +182,10 @@ async function handlePrivateMessage(msg, db, client) {
       switch (command) {
         case 'help':
           await msg.reply(
-            '🤖 *Handbag Search Bot*\n\n' +
-            '📸 Send an image to search for similar handbags\n' +
-            '/stats - View database statistics\n' +
-            'Private messages are used for searching only - not indexed'
+            '🤖 *Bot ya Kutafuta Mikoba*\n\n' +
+            '📸 Tuma picha na /search ili kutafuta mikoba inayofanana\n' +
+            '/stats - Angalia takwimu za database\n' +
+            'Ujumbe wa binafsi unatumika kutafuta tu - hauhifadhiwi'
           );
           break;
 
@@ -185,25 +193,37 @@ async function handlePrivateMessage(msg, db, client) {
           const stats = await db.getStats();
           if (stats) {
             await msg.reply(
-              '📊 *Database Statistics*\n\n' +
-              `Total Products: ${stats.total_products}\n` +
-              `Supplier Groups: ${stats.total_groups}\n` +
-              `Search Queries: ${stats.total_searches}\n` +
-              `Last Updated: ${new Date(stats.last_updated * 1000).toLocaleString()}`
+              '📊 *Takwimu za Database*\n\n' +
+              `Jumla ya Bidhaa: ${stats.total_products}\n` +
+              `Vikundi vya Wasambazaji: ${stats.total_groups}\n` +
+              `Utafutaji: ${stats.total_searches}\n` +
+              `Imesasishwa: ${new Date(stats.last_updated * 1000).toLocaleString()}`
             );
           }
           break;
 
+        case 'search':
+          // /search is handled separately below (requires image)
+          break;
+
         default:
-          await msg.reply('Unknown command. Type /help for available commands.');
+          await msg.reply('Amri haijulikani. Andika /help kuona amri zinazopatikana.');
       }
     }
 
-    // Requirement 1: Images from private chats are NOT saved
-    if (msg.hasMedia) {
-      console.log(`🔍 Image query from ${fromNumber} (not indexed, searching only)`);
-      // Phase 3: Handle image search
-      // Images from private chats are processed for search, not saved to database
+    // Phase 3: Image search - requires both /search command AND image
+    const hasSearchCommand = msg.body && msg.body.toLowerCase().includes('/search');
+    const hasImage = msg.hasMedia;
+
+    if (hasSearchCommand && hasImage) {
+      console.log(`🔍 Image search query from ${fromNumber}`);
+      const { performImageSearch } = require('./searchHandler');
+      await performImageSearch(msg, db, client);
+    } else if (hasSearchCommand && !hasImage) {
+      await msg.reply('❌ Tafadhali tuma picha na amri ya /search ili kutafuta mkoba.');
+    } else if (hasImage && !hasSearchCommand) {
+      // Image without /search command - ignore (don't save, don't search)
+      console.log(`📸 Image received without /search command - ignoring`);
     }
   } catch (err) {
     console.error('Error handling private message:', err.message);

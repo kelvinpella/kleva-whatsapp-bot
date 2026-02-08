@@ -395,6 +395,22 @@ class SupabaseHandler {
     console.log('✓ Supabase auto-backs up daily');
   }
 
+  /**
+   * Get public URL for a file in Supabase storage
+   * @param {string} bucket - Storage bucket name
+   * @param {string} path - File path in bucket
+   * @returns {string|null} Public URL or null if error
+   */
+  getPublicUrl(bucket, path) {
+    try {
+      const { data } = this.supabase.storage.from(bucket).getPublicUrl(path);
+      return data?.publicUrl || null;
+    } catch (err) {
+      console.error('Error getting public URL:', err.message);
+      return null;
+    }
+  }
+
   async close() {
     console.log('✓ Supabase connection closed (pooled connection)');
   }
