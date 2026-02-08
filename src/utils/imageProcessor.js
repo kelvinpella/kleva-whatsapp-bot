@@ -133,6 +133,7 @@ async function processGroupImages(message, mediaList, db, groupName = null) {
       // Requirement 4: Associate with group_id and date_posted
       const resolvedGroupName = groupName || message.groupMetadata?.subject || 'Unknown Group';
       const imageMetadata = {
+        uuid: `${message.from}_${message.timestamp}_${embeddingHash.substring(0, 16)}`,
         groupId: message.from, // Use message.from (more reliable than groupMetadata?.id)
         groupName: resolvedGroupName,
         imagePath: savedImage.path,

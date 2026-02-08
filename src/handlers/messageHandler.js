@@ -12,6 +12,42 @@
 const { processGroupImages, shouldProcessMessage } = require('../utils/imageProcessor');
 const config = require('../config');
 
+const MAX_IMAGES_PER_MESSAGE = 2;
+const BATCH_WINDOW_SECONDS = 30;
+
+// Per-group queue: process messages one at a time so batch limit works
+const groupQueues = new Map();
+
+// Tracks images saved per batch (group_author_timeWindow)
+const batchImageCount = new Map();
+
+function getBatchKey(groupId, author, timestamp) {
+  const tsSec = timestamp > 1e12 ? Math.floor(timestamp / 1000) : timestamp;
+  const window = Math.floor(tsSec / BATCH_WINDOW_SECONDS) * BATCH_WINDOW_SECONDS;
+  return `${groupId}_${author || 'unknown'}_${window}`;
+}
+
+async function runWithGroupLock(groupId, fn) {
+  let queue = groupQueues.get(groupId);
+  if (!queue) {
+    queue = Promise.resolve();
+    groupQueues.set(groupId, queue);
+  }
+  const next = queue.then(() => fn()).finally(() => {});
+  groupQueues.set(groupId, next);
+  return next;
+}
+
+function tryReserveSlot(groupId, author, timestamp) {
+  const key = getBatchKey(groupId, author, timestamp);
+  const count = (batchImageCount.get(key) || 0) + 1;
+  batchImageCount.set(key, count);
+  if (count === 1) {
+    setTimeout(() => batchImageCount.delete(key), (BATCH_WINDOW_SECONDS + 5) * 1000);
+  }
+  return count <= MAX_IMAGES_PER_MESSAGE;
+}
+
 /**
  * Handle incoming group messages
  * - Detects and processes images from supplier groups
@@ -38,86 +74,79 @@ async function handleGroupMessage(msg, db, client) {
       return; // Skip non-qualifying messages
     }
 
-    // Message has media - process images
+    // Message has media - process images (sequential per group so limit is enforced)
     if (msg.hasMedia) {
-      console.log(`\n📸 Processing images from ${groupName}...`);
+      const author = msg.author || msg.from;
 
-      // Download all media from message
-      const mediaList = [];
-      try {
-        // WhatsApp Web JS doesn't directly provide media array
-        // For now, we process the single message media
-        // In Phase 2, we'll handle multiple images per message properly
-        if (msg.hasQuotedMsg) {
-          // Handle quoted images if applicable
-        } else {
-          // Get the media from this message
-          const media = await msg.downloadMedia();
-          if (media) {
-            mediaList.push(media);
+      await runWithGroupLock(groupId, async () => {
+        if (!tryReserveSlot(groupId, author, msg.timestamp)) {
+          console.log(`\n⏭️ Skipping image (max ${MAX_IMAGES_PER_MESSAGE} per message/album)`);
+          return;
+        }
+
+        console.log(`\n📸 Processing images from ${groupName}...`);
+
+        // Download all media from message
+        const mediaList = [];
+        try {
+          if (msg.hasQuotedMsg) {
+            // Handle quoted images if applicable
+          } else {
+            const media = await msg.downloadMedia();
+            if (media) mediaList.push(media);
+          }
+        } catch (err) {
+          console.error('Error downloading media:', err.message);
+          return;
+        }
+
+        if (mediaList.length === 0) return;
+
+        const processedImages = await processGroupImages(msg, mediaList, db, groupName);
+        if (processedImages.length === 0) {
+          console.log('⏭️  No valid handbag images found in message');
+          return;
+        }
+
+        for (const imgData of processedImages) {
+          try {
+            console.log(`💾 Saving image to database (${imgData.groupName})...`);
+            await db.insertProduct({
+              uuid: imgData.uuid,
+              groupId: imgData.groupId,
+              groupName: imgData.groupName,
+              imagePath: imgData.imagePath,
+              imageUrl: imgData.imageUrl || null,
+              thumbnailPath: imgData.thumbnailPath,
+              thumbnailUrl: imgData.thumbnailUrl || null,
+              caption: null,
+              price: null,
+              currency: null,
+              brand: null,
+              bagType: null,
+              embedding: imgData.embedding,
+              embeddingHash: imgData.embeddingHash,
+              messageTimestamp: imgData.messageTimestamp,
+              metadata: {
+                confidence: imgData.confidence,
+                detectedObjects: imgData.detectedObjects,
+                fileSize: imgData.fileSize,
+                dimensions: imgData.dimensions
+              }
+            });
+            console.log(`✅ Image saved: ${imgData.groupName} (${imgData.dimensions})`);
+          } catch (err) {
+            console.error('Error saving image to database:', err.message);
           }
         }
-      } catch (err) {
-        console.error('Error downloading media:', err.message);
-        return;
-      }
 
-      if (mediaList.length === 0) {
-        return;
-      }
-
-      // Process images with validation (pass groupName from chat)
-      const processedImages = await processGroupImages(msg, mediaList, db, groupName);
-
-      if (processedImages.length === 0) {
-        console.log('⏭️  No valid handbag images found in message');
-        return;
-      }
-
-      // Save each validated image to database
-      for (const imgData of processedImages) {
         try {
-          console.log(`💾 Saving image to database (${imgData.groupName})...`);
-
-          // Requirement 4: Save with group_id and date_posted
-          await db.insertProduct({
-            uuid: `${imgData.groupId}_${imgData.messageTimestamp}`,
-            groupId: imgData.groupId,
-            groupName: imgData.groupName,
-            imagePath: imgData.imagePath,
-            imageUrl: imgData.imageUrl || null,
-            thumbnailPath: imgData.thumbnailPath,
-            thumbnailUrl: imgData.thumbnailUrl || null,
-            caption: null, // Requirement 3: No prices, only images
-            price: null, // Requirement 3: No price data
-            currency: null,
-            brand: null,
-            bagType: null,
-            embedding: imgData.embedding,
-            embeddingHash: imgData.embeddingHash,
-            messageTimestamp: imgData.messageTimestamp,
-            // Store validation confidence for later use
-            metadata: {
-              confidence: imgData.confidence,
-              detectedObjects: imgData.detectedObjects,
-              fileSize: imgData.fileSize,
-              dimensions: imgData.dimensions
-            }
-          });
-
-          console.log(`✅ Image saved: ${imgData.groupName} (${imgData.dimensions})`);
+          await db.updateGroupProductCount(groupId);
+          await db.updateStats();
         } catch (err) {
-          console.error('Error saving image to database:', err.message);
+          console.error('Error updating stats:', err.message);
         }
-      }
-
-      // Update group stats
-      try {
-        await db.updateGroupProductCount(groupId);
-        await db.updateStats();
-      } catch (err) {
-        console.error('Error updating stats:', err.message);
-      }
+      });
     }
   } catch (err) {
     console.error('Error handling group message:', err.message);

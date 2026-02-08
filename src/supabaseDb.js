@@ -38,28 +38,30 @@ class SupabaseHandler {
 
   async insertProduct(data) {
     try {
+      const row = {
+        product_uuid: data.uuid,
+        group_id: data.groupId,
+        group_name: data.groupName,
+        image_path: data.imagePath,
+        thumbnail_path: data.thumbnailPath || null,
+        caption: data.caption || null,
+        price: data.price || null,
+        currency: data.currency || 'TZS',
+        brand: data.brand || null,
+        bag_type: data.bagType || null,
+        embedding: data.embedding || null,
+        embedding_hash: data.embeddingHash || null,
+        message_timestamp: data.messageTimestamp || Math.floor(Date.now() / 1000),
+        indexed_at: Math.floor(Date.now() / 1000)
+      };
+
       const { data: result, error } = await this.supabase
         .from('products')
-        .insert([{
-          product_uuid: data.uuid,
-          group_id: data.groupId,
-          group_name: data.groupName,
-          image_path: data.imagePath,
-          thumbnail_path: data.thumbnailPath || null,
-          caption: data.caption || null,
-          price: data.price || null,
-          currency: data.currency || 'TZS',
-          brand: data.brand || null,
-          bag_type: data.bagType || null,
-          embedding: data.embedding || null,
-          embedding_hash: data.embeddingHash || null,
-          message_timestamp: data.messageTimestamp || Math.floor(Date.now() / 1000),
-          indexed_at: Math.floor(Date.now() / 1000)
-        }])
+        .upsert([row], { onConflict: 'product_uuid', ignoreDuplicates: true })
         .select();
 
       if (error) throw error;
-      return result?.[0];
+      return result?.[0] || null;
     } catch (err) {
       console.error('Error inserting product:', err.message);
       throw err;
