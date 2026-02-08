@@ -125,15 +125,21 @@ async function processGroupImages(message, mediaList, db, groupName = null) {
         continue;
       }
 
-      // Calculate embedding for similarity search (from original buffer)
-      const embedding = await calculateEmbedding(imageBuffer);
-      const embeddingHash = crypto.createHash('sha256').update(embedding).digest('hex');
+      // Calculate hybrid embedding (pHash + color histogram)
+      const embeddingResult = await calculateEmbedding(imageBuffer);
+      if (!embeddingResult) {
+        console.log(`❌ Failed to compute embedding for image ${i + 1}`);
+        continue;
+      }
+      const { pHash, histogram } = embeddingResult;
+      const embeddingHash = pHash;
+      const embeddingJson = JSON.stringify(histogram);
 
       // Prepare image metadata
-      // Requirement 4: Associate with group_id and date_posted
       const resolvedGroupName = groupName || message.groupMetadata?.subject || 'Unknown Group';
+      const uniqueId = crypto.createHash('sha256').update(pHash + JSON.stringify(histogram)).digest('hex').substring(0, 16);
       const imageMetadata = {
-        uuid: `${message.from}_${message.timestamp}_${embeddingHash.substring(0, 16)}`,
+        uuid: `${message.from}_${message.timestamp}_${uniqueId}`,
         groupId: message.from, // Use message.from (more reliable than groupMetadata?.id)
         groupName: resolvedGroupName,
         imagePath: savedImage.path,
@@ -142,7 +148,7 @@ async function processGroupImages(message, mediaList, db, groupName = null) {
         thumbnailUrl: savedImage.thumbnailUrl || null,
         messageTimestamp: message.timestamp,
         datePadded: new Date(message.timestamp * 1000).toISOString(),
-        embedding: embedding,
+        embedding: embeddingJson,
         embeddingHash: embeddingHash,
         // Metadata (no ML validation)
         confidence: 'n/a',
@@ -245,13 +251,46 @@ async function generateThumbnail(imagePath) {
 }
 
 /**
- * Calculate embedding hash for similarity search
- * Phase 2: Basic SHA256 hash
- * Phase 3: Will implement perceptual hash + color histogram
- *
- * @param {string} imagePath - Path to saved image
- * @returns {Promise<string>} Embedding hash
+ * Perceptual hash (dHash) - 64-bit difference hash for visual similarity
  */
+async function calculatePerceptualHash(imageBuffer) {
+  const { data } = await sharp(imageBuffer)
+    .resize(9, 8, { fit: 'fill' })
+    .grayscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  let bits = '';
+  for (let y = 0; y < 8; y++) {
+    for (let x = 0; x < 8; x++) {
+      const idx = y * 9 + x;
+      bits += data[idx] < data[idx + 1] ? '1' : '0';
+    }
+  }
+  return parseInt(bits, 2).toString(16).padStart(16, '0');
+}
+
+/**
+ * Color histogram - 64 bins (4x4x4 RGB) for color-based similarity
+ */
+async function calculateColorHistogram(imageBuffer) {
+  const img = sharp(imageBuffer).resize(64, 64, { fit: 'inside' });
+  const { data, info } = await img.removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  const channels = info.channels || 3;
+  const bins = new Array(64).fill(0);
+  const step = 256 / 4;
+
+  for (let i = 0; i < data.length; i += channels) {
+    const r = Math.min(Math.floor(data[i] / step), 3);
+    const g = Math.min(Math.floor(data[i + 1] / step), 3);
+    const b = Math.min(Math.floor((data[i + 2] || 0) / step), 3);
+    bins[r * 16 + g * 4 + b]++;
+  }
+
+  const sum = bins.reduce((a, b) => a + b, 0);
+  return sum > 0 ? bins.map(b => b / sum) : bins;
+}
+
 async function calculateEmbedding(input) {
   try {
     let imageBuffer;
@@ -263,14 +302,12 @@ async function calculateEmbedding(input) {
       throw new Error('Unsupported input for calculateEmbedding');
     }
 
-    // Phase 2: Simple SHA256 hash (placeholder)
-    // Phase 3: Will implement:
-    // - Perceptual hashing (pHash) for content similarity
-    // - Color histogram for color matching
-    // - Combined confidence scoring
+    const [pHash, histogram] = await Promise.all([
+      calculatePerceptualHash(imageBuffer),
+      calculateColorHistogram(imageBuffer)
+    ]);
 
-    const hash = crypto.createHash('sha256').update(imageBuffer).digest('hex');
-    return hash;
+    return { pHash, histogram };
   } catch (err) {
     console.error('Error calculating embedding:', err.message);
     return null;

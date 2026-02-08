@@ -32,8 +32,8 @@ Skill Level Required: Intermediate JavaScript
 - ✅ Environment configured with Supabase credentials (.env, .env.example)
 
 **Current Status:**
-- 🔄 On feature/scaffold branch with all Phase 1 code committed
-- 📍 Ready to begin Phase 2: Core Functionality (Days 4-7)
+- ✅ Phase 2 complete (image-search branch)
+- 📍 Ready for Phase 3: Search Functionality (Days 8-10)
 
 ----------
 📅 PHASE 1: SETUP & FOUNDATION (Days 1-3)
@@ -151,11 +151,11 @@ Morning: Image Storage
 - Handle different image formats
 - Implement file naming convention
 
-Afternoon: Embedding Generation
+Afternoon: Embedding Generation (✅ Done)
 
-- Implement perceptual hash algorithm (simple, fast)
-- Create color histogram extraction (captures colors)
-- Build hybrid embedding (combines both methods)
+- ✅ Implement perceptual hash (dHash) algorithm (simple, fast)
+- ✅ Create color histogram extraction (64 bins, 4x4x4 RGB)
+- ✅ Build hybrid embedding (combines pHash + histogram)
 - Optimize for speed vs accuracy
 - Test with sample images
 
@@ -219,19 +219,19 @@ Day 6 Afternoon: Processing Pipeline
 - Extract metadata (price, brand, type)
 - Save everything to database
 
-Day 7 Morning: Error Handling
+Day 7 Morning: Error Handling (✅ Partial)
 
-- Handle download failures
-- Handle corrupted images
-- Handle database errors
+- ✅ Handle download failures
+- ✅ Handle corrupted images
+- ✅ Handle database errors
 - Implement retry logic
 - Add comprehensive logging
 
-Day 7 Afternoon: Optimization
+Day 7 Afternoon: Optimization (✅ Done)
 
-- Add processing queue (don't block other messages)
+- ✅ Add processing queue (per-group sequential)
 - Implement rate limiting (don't overwhelm system)
-- Add duplicate detection (same image posted twice)
+- ✅ Add duplicate detection (upsert + unique uuid)
 - Optimize memory usage
 - Test with multiple simultaneous images
 

@@ -1,4 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
+const { findSimilarProductsHybrid } = require('./utils/similarity');
 
 class SupabaseHandler {
   constructor() {
@@ -101,18 +102,23 @@ class SupabaseHandler {
     }
   }
 
-  async searchSimilarProducts(embeddingHash, minSimilarity = 0.7, limit = 5) {
+  async searchSimilarProducts(searchEmbedding, minSimilarity = 0.7, limit = 5) {
     try {
-      // For now, return products with same embedding hash
-      // In Phase 3, this will use Supabase vector search (pgvector)
-      const { data, error } = await this.supabase
+      const { pHash, histogram } = typeof searchEmbedding === 'object' && searchEmbedding !== null
+        ? searchEmbedding
+        : { pHash: searchEmbedding, histogram: null };
+
+      const { data: products, error } = await this.supabase
         .from('products')
         .select()
-        .eq('embedding_hash', embeddingHash)
-        .limit(limit);
+        .order('indexed_at', { ascending: false })
+        .limit(500);
 
       if (error) throw error;
-      return data || [];
+      if (!products || products.length === 0) return [];
+
+      const results = findSimilarProductsHybrid(pHash, histogram, products, minSimilarity, 0.6);
+      return results.slice(0, limit);
     } catch (err) {
       console.error('Error searching similar products:', err.message);
       return [];
