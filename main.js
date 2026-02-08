@@ -1,6 +1,6 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
-const DatabaseHandler = require('./src/db');
+const SupabaseHandler = require('./src/supabaseDb');
 const config = require('./src/config');
 
 let client;
@@ -9,7 +9,7 @@ let db;
 async function startBot() {
   try {
     // Initialize database
-    db = new DatabaseHandler();
+    db = new SupabaseHandler();
 
     // Configure WhatsApp client
     const puppeteerArgs = [
@@ -79,8 +79,7 @@ process.on('SIGINT', async () => {
   
   try {
     if (db) {
-      db.vacuum();
-      db.close();
+      await db.close();
     }
     
     if (client) {

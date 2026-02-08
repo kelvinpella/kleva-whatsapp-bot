@@ -1,6 +1,6 @@
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
-const DatabaseHandler = require('./db');
+const SupabaseHandler = require('./supabaseDb');
 const config = require('./config');
 
 let client;
@@ -13,7 +13,7 @@ async function startBot() {
   console.log('🤖 Starting WhatsApp bot...');
 
   // Initialize database
-  db = new DatabaseHandler();
+  db = new SupabaseHandler();
   console.log('✓ Database initialized');
 
   // Configure WhatsApp client
