@@ -36,6 +36,11 @@ async function startBot() {
         client.on('qr', qr => {
             console.log('\n📱 QR Code received — scan with WhatsApp on your phone:\n');
             qrcode.generate(qr, { small: true });
+
+            // Also output QR code URL for generating image online
+            console.log('\n🔗 Alternative: Generate QR image at:');
+            console.log(`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qr)}`);
+            console.log('\nOpen this URL in your browser, then scan the QR image with WhatsApp.\n');
         });
 
         client.on('authenticated', () => {
