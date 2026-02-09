@@ -13,6 +13,8 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const config = require('../config');
+const tf = require('@tensorflow/tfjs-node');
+const mobilenet = require('@tensorflow-models/mobilenet');
 
 const IMAGES_DIR = path.join(__dirname, '..', '..', 'data', 'images');
 
@@ -20,6 +22,35 @@ const IMAGES_DIR = path.join(__dirname, '..', '..', 'data', 'images');
 if (!fs.existsSync(IMAGES_DIR)) {
   fs.mkdirSync(IMAGES_DIR, { recursive: true });
 }
+
+// TensorFlow MobileNet model (loaded once at startup)
+let model = null;
+
+/**
+ * Load MobileNet model for semantic embeddings
+ * Called once at module initialization
+ */
+async function loadModel() {
+  if (model) return model;
+
+  console.log('🧠 Loading MobileNet model for semantic image embeddings...');
+  try {
+    model = await mobilenet.load({
+      version: 2,
+      alpha: 1.0 // Full model for best accuracy
+    });
+    console.log('✓ MobileNet model loaded successfully');
+    return model;
+  } catch (err) {
+    console.error('❌ Failed to load MobileNet model:', err.message);
+    throw err;
+  }
+}
+
+// Pre-load model at module initialization
+loadModel().catch(err => {
+  console.error('Failed to pre-load MobileNet model:', err.message);
+});
 
 /**
  * Process images from a WhatsApp message
@@ -125,19 +156,21 @@ async function processGroupImages(message, mediaList, db, groupName = null) {
         continue;
       }
 
-      // Calculate hybrid embedding (pHash + color histogram)
+      // Calculate multi-feature embeddings (semantic + texture + color)
       const embeddingResult = await calculateEmbedding(imageBuffer);
       if (!embeddingResult) {
         console.log(`❌ Failed to compute embedding for image ${i + 1}`);
         continue;
       }
-      const { pHash, histogram } = embeddingResult;
-      const embeddingHash = pHash;
-      const embeddingJson = JSON.stringify(histogram);
+      const { embedding, textureFeatures, colorFeatures } = embeddingResult;
+      const embeddingJson = JSON.stringify(embedding);
+      const textureJson = JSON.stringify(textureFeatures);
+      const colorJson = JSON.stringify(colorFeatures);
+      const embeddingHash = null; // No longer using pHash
 
       // Prepare image metadata
       const resolvedGroupName = groupName || message.groupMetadata?.subject || 'Unknown Group';
-      const uniqueId = crypto.createHash('sha256').update(pHash + JSON.stringify(histogram)).digest('hex').substring(0, 16);
+      const uniqueId = crypto.createHash('sha256').update(embeddingJson).digest('hex').substring(0, 16);
       const imageMetadata = {
         uuid: `${message.from}_${message.timestamp}_${uniqueId}`,
         groupId: message.from, // Use message.from (more reliable than groupMetadata?.id)
@@ -149,6 +182,8 @@ async function processGroupImages(message, mediaList, db, groupName = null) {
         messageTimestamp: message.timestamp,
         datePadded: new Date(message.timestamp * 1000).toISOString(),
         embedding: embeddingJson,
+        textureFeatures: textureJson,   // NEW: 16-dim edge histogram
+        colorFeatures: colorJson,       // NEW: 6-dim RGB stats
         embeddingHash: embeddingHash,
         // Metadata (no ML validation)
         confidence: 'n/a',
@@ -251,48 +286,141 @@ async function generateThumbnail(imagePath) {
 }
 
 /**
- * Perceptual hash (dHash) - 64-bit difference hash for visual similarity
+ * Extract texture features using Sobel edge detection
+ * Returns 16-dimensional histogram of edge magnitudes
+ * Background-invariant: captures surface patterns, hardware, stitching details
+ *
+ * @param {Buffer} imageBuffer - Image buffer
+ * @returns {Promise<Array>} 16-element normalized histogram
  */
-async function calculatePerceptualHash(imageBuffer) {
-  const { data } = await sharp(imageBuffer)
-    .resize(9, 8, { fit: 'fill' })
-    .grayscale()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
+async function extractTextureFeatures(imageBuffer) {
+  try {
+    // Resize to 224x224 and convert to grayscale for edge detection
+    const grayBuffer = await sharp(imageBuffer)
+      .resize(224, 224, { fit: 'cover' })
+      .greyscale()
+      .toBuffer();
 
-  let bits = '';
-  for (let y = 0; y < 8; y++) {
-    for (let x = 0; x < 8; x++) {
-      const idx = y * 9 + x;
-      bits += data[idx] < data[idx + 1] ? '1' : '0';
+    // Apply Sobel-X kernel (horizontal edges)
+    const sobelXBuffer = await sharp(grayBuffer)
+      .convolve({
+        width: 3,
+        height: 3,
+        kernel: [-1, 0, 1, -2, 0, 2, -1, 0, 1]
+      })
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    // Apply Sobel-Y kernel (vertical edges)
+    const sobelYBuffer = await sharp(grayBuffer)
+      .convolve({
+        width: 3,
+        height: 3,
+        kernel: [-1, -2, -1, 0, 0, 0, 1, 2, 1]
+      })
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    // Calculate edge magnitude: sqrt(Gx² + Gy²) for each pixel
+    const edgeMagnitudes = [];
+    const pixelCount = sobelXBuffer.data.length;
+
+    for (let i = 0; i < pixelCount; i++) {
+      const gx = sobelXBuffer.data[i];
+      const gy = sobelYBuffer.data[i];
+      const magnitude = Math.sqrt(gx * gx + gy * gy);
+      edgeMagnitudes.push(magnitude);
     }
+
+    // Create 16-bin histogram of edge strengths
+    const histogram = new Array(16).fill(0);
+    // Avoid stack overflow with large arrays - use reduce instead of spread operator
+    const maxMagnitude = edgeMagnitudes.reduce((max, val) => Math.max(max, val), 0);
+
+    if (maxMagnitude > 0) {
+      for (const magnitude of edgeMagnitudes) {
+        const bin = Math.min(15, Math.floor((magnitude / maxMagnitude) * 16));
+        histogram[bin]++;
+      }
+    }
+
+    // Normalize histogram (sum to 1.0)
+    const total = histogram.reduce((a, b) => a + b, 0);
+    const normalizedHistogram = total > 0
+      ? histogram.map(count => count / total)
+      : histogram;
+
+    return normalizedHistogram;
+  } catch (err) {
+    console.error('Error extracting texture features:', err.message);
+    return new Array(16).fill(0); // Return zero vector on error
   }
-  return parseInt(bits, 2).toString(16).padStart(16, '0');
 }
 
 /**
- * Color histogram - 64 bins (4x4x4 RGB) for color-based similarity
+ * Extract color features from center region only
+ * Returns 6-dimensional RGB statistics (mean, stdev for R/G/B)
+ * Background-avoidant: focuses on center 60% where bag typically appears
+ *
+ * @param {Buffer} imageBuffer - Image buffer
+ * @returns {Promise<Array>} 6-element array [R_mean, R_std, G_mean, G_std, B_mean, B_std]
  */
-async function calculateColorHistogram(imageBuffer) {
-  const img = sharp(imageBuffer).resize(64, 64, { fit: 'inside' });
-  const { data, info } = await img.removeAlpha().raw().toBuffer({ resolveWithObject: true });
-  const channels = info.channels || 3;
-  const bins = new Array(64).fill(0);
-  const step = 256 / 4;
+async function extractColorFeatures(imageBuffer) {
+  try {
+    // Get image dimensions
+    const metadata = await sharp(imageBuffer).metadata();
+    const { width, height } = metadata;
 
-  for (let i = 0; i < data.length; i += channels) {
-    const r = Math.min(Math.floor(data[i] / step), 3);
-    const g = Math.min(Math.floor(data[i + 1] / step), 3);
-    const b = Math.min(Math.floor((data[i + 2] || 0) / step), 3);
-    bins[r * 16 + g * 4 + b]++;
+    // Calculate center crop dimensions (60% of original)
+    const cropWidth = Math.floor(width * 0.6);
+    const cropHeight = Math.floor(height * 0.6);
+    const left = Math.floor((width - cropWidth) / 2);
+    const top = Math.floor((height - cropHeight) / 2);
+
+    // Extract center region and normalize size
+    const centerRegion = await sharp(imageBuffer)
+      .extract({ left, top, width: cropWidth, height: cropHeight })
+      .resize(224, 224, { fit: 'cover' })
+      .toBuffer();
+
+    // Get per-channel statistics
+    const stats = await sharp(centerRegion).stats();
+
+    // Extract RGB means and standard deviations (normalized to [0,1])
+    const colorFeatures = [
+      stats.channels[0].mean / 255,    // R mean
+      stats.channels[0].stdev / 255,   // R stdev
+      stats.channels[1].mean / 255,    // G mean
+      stats.channels[1].stdev / 255,   // G stdev
+      stats.channels[2].mean / 255,    // B mean
+      stats.channels[2].stdev / 255    // B stdev
+    ];
+
+    return colorFeatures;
+  } catch (err) {
+    console.error('Error extracting color features:', err.message);
+    return [0, 0, 0, 0, 0, 0]; // Return zero vector on error
   }
-
-  const sum = bins.reduce((a, b) => a + b, 0);
-  return sum > 0 ? bins.map(b => b / sum) : bins;
 }
 
+/**
+ * Calculate multi-feature embeddings for image matching
+ * Combines three complementary features:
+ * 1. Semantic embeddings (MobileNet, 1280-dim) - overall shape/design
+ * 2. Texture features (edge histogram, 16-dim) - surface patterns, hardware
+ * 3. Color features (RGB stats, 6-dim) - color identity without background
+ *
+ * @param {Buffer|string} input - Image buffer or file path
+ * @returns {Promise<Object>} { embedding: [1280 floats], textureFeatures: [16 floats], colorFeatures: [6 floats] }
+ */
 async function calculateEmbedding(input) {
   try {
+    // Ensure model is loaded
+    if (!model) {
+      await loadModel();
+    }
+
+    // Get image buffer
     let imageBuffer;
     if (Buffer.isBuffer(input)) {
       imageBuffer = input;
@@ -302,14 +430,41 @@ async function calculateEmbedding(input) {
       throw new Error('Unsupported input for calculateEmbedding');
     }
 
-    const [pHash, histogram] = await Promise.all([
-      calculatePerceptualHash(imageBuffer),
-      calculateColorHistogram(imageBuffer)
-    ]);
+    // 1. Extract MobileNet semantic embeddings (1280-dim)
+    const resizedBuffer = await sharp(imageBuffer)
+      .resize(224, 224, { fit: 'cover' })
+      .toBuffer();
 
-    return { pHash, histogram };
+    const imageTensor = tf.node.decodeImage(resizedBuffer, 3);
+    const normalizedTensor = imageTensor.toFloat().div(tf.scalar(255.0));
+    const batchedTensor = normalizedTensor.expandDims(0);
+
+    // Get embeddings from the layer before the final classification layer
+    // MobileNet v2 has 1280 features before the final 1000-class classification
+    const embeddings = model.infer(batchedTensor, true); // true = return embeddings (intermediate layer)
+
+    const embeddingArray = await embeddings.data();
+    const semanticEmbedding = Array.from(embeddingArray);
+
+    // Clean up tensors
+    imageTensor.dispose();
+    normalizedTensor.dispose();
+    batchedTensor.dispose();
+    embeddings.dispose();
+
+    // 2. Extract texture features (16-dim edge histogram)
+    const textureFeatures = await extractTextureFeatures(imageBuffer);
+
+    // 3. Extract color features (6-dim RGB statistics from center crop)
+    const colorFeatures = await extractColorFeatures(imageBuffer);
+
+    return {
+      embedding: semanticEmbedding,      // 1280-dim MobileNet
+      textureFeatures: textureFeatures,  // 16-dim edge histogram
+      colorFeatures: colorFeatures       // 6-dim RGB stats
+    };
   } catch (err) {
-    console.error('Error calculating embedding:', err.message);
+    console.error('Error calculating multi-feature embeddings:', err.message);
     return null;
   }
 }
