@@ -34,8 +34,8 @@ Go to your Railway project → **Variables** tab → Add:
 
 ```env
 NODE_ENV=production
-YOUR_PHONE_NUMBER=+255651359011
-SUPABASE_URL=https://fxytsxnyuwuuazieuboc.supabase.co
+YOUR_PHONE_NUMBER=+255XXXXXXXXXX
+SUPABASE_URL=https://your-project-id.supabase.co
 SUPABASE_KEY=your_supabase_anon_key
 SUPABASE_STORAGE_BUCKET=handbags
 MIN_SIMILARITY=0.4

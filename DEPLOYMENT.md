@@ -57,7 +57,7 @@ Go to your project → Variables tab → Add the following:
 NODE_ENV=production
 
 # Bot Configuration
-YOUR_PHONE_NUMBER=+255651359011
+YOUR_PHONE_NUMBER=+255XXXXXXXXXX
 CLEANUP_DAYS=30
 MIN_SIMILARITY=0.4
 
@@ -67,7 +67,7 @@ MAX_IMAGES_PER_MESSAGE=2
 MAX_IMAGE_SIZE_KB=5000
 
 # Supabase Configuration
-SUPABASE_URL=https://fxytsxnyuwuuazieuboc.supabase.co
+SUPABASE_URL=https://your-project-id.supabase.co
 SUPABASE_KEY=your_supabase_anon_key_here
 SUPABASE_STORAGE_BUCKET=handbags
 ```
