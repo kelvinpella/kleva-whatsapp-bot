@@ -17,8 +17,6 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.95.3",
-    
-    "better-sqlite3": "^12.6.2",
     "dotenv": "^17.2.4",
     "node-cron": "^4.2.1",
     "qrcode-terminal": "^0.12.0",
