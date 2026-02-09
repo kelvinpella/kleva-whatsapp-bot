@@ -11,6 +11,7 @@
 const { calculateEmbedding } = require('../utils/imageProcessor');
 const { MessageMedia } = require('whatsapp-web.js');
 const config = require('../config');
+const crypto = require('crypto');
 
 /**
  * Perform image search for private messages
@@ -45,19 +46,25 @@ async function performImageSearch(msg, db, client, resultsSent = null, imageNumb
     // Convert base64 to buffer
     const imageBuffer = Buffer.from(media.data, 'base64');
 
-    // Step 2: Generate embedding for search image
-    console.log('🧮 Generating embedding...');
-    const embedding = await calculateEmbedding(imageBuffer);
+    // Step 2: Generate multi-feature embeddings (semantic + texture + color)
+    console.log('🧮 Generating multi-feature embeddings...');
+    const embeddingResult = await calculateEmbedding(imageBuffer);
 
-    if (!embedding || !embedding.pHash) {
+    if (!embeddingResult || !embeddingResult.embedding) {
       await msg.reply('❌ Imeshindikana kusindika picha. Tafadhali jaribu na picha nyingine.');
       return;
     }
 
-    // Step 3: Query database for similar products
-    console.log('🔎 Searching database...');
-    const minSimilarity = config.minSimilarity || 0.7;
-    const results = await db.searchSimilarProducts(embedding, minSimilarity, 50);
+    const { embedding, textureFeatures, colorFeatures } = embeddingResult;
+
+    // Step 3: Query database using multi-feature matching (semantic + texture + color)
+    console.log('🔎 Searching database with multi-feature matching...');
+    const minSimilarity = config.minSimilarity || 0.70;
+    const results = await db.searchSimilarProductsMultiFeature(
+      { embedding, textureFeatures, colorFeatures },
+      minSimilarity,
+      50
+    );
 
     if (!results || results.length === 0) {
       // Include image number if in album search
@@ -68,9 +75,14 @@ async function performImageSearch(msg, db, client, resultsSent = null, imageNumb
       await msg.reply(notFoundMsg);
       console.log(`❌ No matches found${imageNumber ? ` (image ${imageNumber})` : ''}`);
 
-      // Log search history
+      // Log search history (generate hash from embedding for tracking)
+      const embeddingHash = crypto.createHash('sha256')
+        .update(JSON.stringify(embedding))
+        .digest('hex')
+        .substring(0, 16);
+
       await db.insertSearchRecord({
-        embeddingHash: embedding.pHash,
+        embeddingHash,
         resultsCount: 0,
         topMatchId: null,
         topMatchScore: null,
@@ -87,9 +99,16 @@ async function performImageSearch(msg, db, client, resultsSent = null, imageNumb
     // Check for duplicate in album search
     if (resultsSent && resultsSent.has(firstMatch.product_uuid)) {
       console.log(`⏭️ Skipping duplicate result: ${firstMatch.group_name} (already sent in this album)`);
+
+      // Generate hash from embedding for tracking
+      const embeddingHash = crypto.createHash('sha256')
+        .update(JSON.stringify(embedding))
+        .digest('hex')
+        .substring(0, 16);
+
       // Still log the search but don't send duplicate response
       await db.insertSearchRecord({
-        embeddingHash: embedding.pHash,
+        embeddingHash,
         resultsCount: results.length,
         topMatchId: null,
         topMatchScore: firstMatch.similarity,
@@ -152,9 +171,15 @@ async function performImageSearch(msg, db, client, resultsSent = null, imageNumb
       await msg.reply(response);
     }
 
+    // Generate hash from embedding for tracking
+    const embeddingHash = crypto.createHash('sha256')
+      .update(JSON.stringify(embedding))
+      .digest('hex')
+      .substring(0, 16);
+
     // Log successful search
     await db.insertSearchRecord({
-      embeddingHash: embedding.pHash,
+      embeddingHash,
       resultsCount: results.length,
       topMatchId: null,  // Skip storing UUID (column is bigint, we use string UUIDs)
       topMatchScore: firstMatch.similarity,

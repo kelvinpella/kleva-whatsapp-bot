@@ -7,16 +7,18 @@
   "type": "commonjs",
   "main": "main.js",
   "engines": {
-    "node": ">=18.0.0",
+    "node": ">=18.0.0 <=22.x",
     "npm": ">=9.0.0"
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node .",
-    "dev": "nodemon ."
+    "dev": "./start-bot.sh"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.95.3",
+    "@tensorflow-models/mobilenet": "^2.1.1",
+    "@tensorflow/tfjs-node": "^4.22.0",
     "dotenv": "^17.2.4",
     "node-cron": "^4.2.1",
     "qrcode-terminal": "^0.12.0",
