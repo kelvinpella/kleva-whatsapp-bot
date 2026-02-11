@@ -12,11 +12,11 @@ const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const config = require('../config');
+const config = require('../../../config');
 const tf = require('@tensorflow/tfjs-node');
 const mobilenet = require('@tensorflow-models/mobilenet');
 
-const IMAGES_DIR = path.join(__dirname, '..', '..', 'data', 'images');
+const IMAGES_DIR = path.join(__dirname, '..', '..', '..', '..', 'data', 'images');
 
 // Ensure images directory exists
 if (!fs.existsSync(IMAGES_DIR)) {

@@ -9,8 +9,8 @@
  * 4. Associate with group_id, date_posted
  */
 
-const { processGroupImages, shouldProcessMessage } = require('../utils/imageProcessor');
-const config = require('../config');
+const { processGroupImages, shouldProcessMessage } = require('../services/imageProcessor');
+const config = require('../../../config');
 
 const MAX_IMAGES_PER_MESSAGE = 2;
 const BATCH_WINDOW_SECONDS = 30;
