@@ -1,9 +1,53 @@
 # 🚀 TikTok Auto-Poster Implementation Plan
 
-**Project**: WhatsApp to TikTok Album Auto-Upload Integration
-**Timeline**: 4-6 weeks (including TikTok API approval wait time)
+**Project**: WhatsApp to TikTok Album Auto-Upload Integration via Publer
+**Timeline**: 2-3 weeks (no API approval wait needed!)
 **Approach**: Integration into existing WhatsApp bot
-**Technology**: Node.js, Bull Queue, Redis, TikTok Content Posting API
+**Technology**: Node.js, Bull Queue, Redis, Publer API (https://publer.com/)
+
+---
+
+## 🎯 WHY PUBLER?
+
+### ✅ **Benefits Over TikTok Official API**
+
+1. **No Approval Wait** ⚡
+   - TikTok API: 2-4 weeks approval time
+   - Publer: Start immediately (5-minute setup)
+
+2. **Simpler Authentication** 🔐
+   - TikTok API: Complex OAuth 2.0 flow, token refresh, callback URLs
+   - Publer: Simple API key authentication
+
+3. **Abstraction Layer** 🛡️
+   - TikTok API: Direct dependency on TikTok's API changes
+   - Publer: Handles TikTok API updates automatically
+
+4. **Multi-Platform Ready** 🌐
+   - TikTok API: Only TikTok
+   - Publer: Can easily add Instagram, Facebook, Twitter later
+
+5. **Managed Service** 🔧
+   - TikTok API: You handle rate limits, retries, errors
+   - Publer: Handles infrastructure, queue management, retry logic
+
+6. **Lower Development Time** ⏱️
+   - TikTok API: ~4-6 weeks (including wait)
+   - Publer: ~2-3 weeks (no wait, simpler code)
+
+### ⚠️ **Trade-offs**
+
+- **Cost**: +$10-15/month for Publer subscription
+- **Dependency**: Relies on third-party service (but well-established)
+- **Control**: Less direct control over TikTok posting flow
+
+### 💡 **Verdict**
+
+For this use case (automated product posting), Publer is the **better choice**:
+- Faster time-to-market
+- Simpler implementation
+- Lower maintenance burden
+- Small additional cost is worth the time saved
 
 ---
 
@@ -12,10 +56,10 @@
 ### Core Functionality
 - ✅ Detect media (images/videos) from supplier group messages
 - ✅ Group all media from **single WhatsApp message** into one album
-- ✅ Upload albums to TikTok sequentially (one at a time)
+- ✅ Upload albums to TikTok via Publer API sequentially (one at a time)
 - ✅ 1-minute delay between album uploads
 - ✅ Random caption selection from predefined list
-- ✅ OAuth token refresh mechanism
+- ✅ Publer API authentication (API key based - simple!)
 - ✅ Media format validation (no manipulation)
 - ✅ Error handling with retry logic
 
@@ -37,54 +81,59 @@
 
 ---
 
-## 🗓️ WEEK 0: PRE-DEVELOPMENT (BLOCKING - STARTS IMMEDIATELY)
+## 🗓️ WEEK 0: PRE-DEVELOPMENT (Quick Setup - No Waiting!)
 
-### **Action Items (Complete ASAP)**
+### **Action Items (Complete in 1-2 hours)**
 
-#### 1. TikTok API Access Application (1-2 hours)
-**CRITICAL**: This has 2-4 week approval time - start NOW
+#### 1. Publer Account Setup (15 minutes)
+**Much simpler than TikTok API - no approval wait!**
 
-- [ ] Create TikTok for Developers account
-- [ ] Register new app at https://developers.tiktok.com/
-- [ ] Fill out application form:
-  - App name: "Kleva Product Showcase"
-  - Description: "Automated product catalog posting from supplier feeds"
-  - Use case: "E-commerce content automation"
-  - Products needed: "Content Posting API"
-- [ ] Submit for review
-- [ ] Wait for approval email (track status daily)
+- [ ] Sign up for Publer at https://publer.com/
+- [ ] Choose appropriate plan:
+  - Free tier: 3 social accounts, basic scheduling
+  - Pro tier ($10-15/month): More accounts, advanced features
+  - Recommended: Start with Pro for API access
+- [ ] Connect your TikTok account to Publer:
+  - Login to Publer dashboard
+  - Go to "Social Accounts" → Add Account → TikTok
+  - Authorize Publer to post on your behalf
+  - Publer handles all TikTok authentication!
 
-#### 2. TikTok Business Account Setup (30 minutes)
-- [ ] Create/convert TikTok account to Business Account
+#### 2. Publer API Key (10 minutes)
+- [ ] Get API credentials from Publer dashboard
+- [ ] Navigate to Settings → API or Integrations
+- [ ] Generate API key/token
+- [ ] Add to `.env`: `PUBLER_API_KEY=xxx`
+- [ ] Document account ID/workspace ID if needed
+
+#### 3. TikTok Account Setup (30 minutes)
+- [ ] Create/convert TikTok account to Business Account (if not already)
 - [ ] Set up profile:
   - Username: @kleva_handbags (or similar)
   - Bio: "Latest handbag collections 👜 | Tanzania 🇹🇿"
   - Profile picture
   - Link to website/WhatsApp Business
-- [ ] Document account credentials in `.env`
+- [ ] Connect to Publer (done in step 1)
+- [ ] Test manual post via Publer dashboard
 
-#### 3. API Research & Documentation (2-3 hours)
-- [ ] Read TikTok Content Posting API documentation thoroughly
-- [ ] Verify photo carousel/album support:
-  - Check if API supports multi-image posts
-  - Understand image vs video album limitations
-  - Document maximum images per album
-- [ ] Document rate limits:
-  - Posts per minute
-  - Posts per hour
-  - Posts per day
-  - Account-level restrictions
+#### 4. Publer API Research & Documentation (1-2 hours)
+- [ ] Read Publer API documentation: https://publer.com/api-documentation
+- [ ] Understand key endpoints:
+  - POST `/posts` - Create and schedule posts
+  - GET `/posts/{id}` - Get post status
+  - POST `/media/upload` - Upload media files
+  - GET `/accounts` - List connected social accounts
 - [ ] Understand media requirements:
-  - Image formats (JPEG, PNG, etc.)
-  - Video formats (MP4, MOV, etc.)
-  - File size limits
-  - Aspect ratio requirements
-  - Duration limits (videos)
-- [ ] Test OAuth 2.0 flow in sandbox (if available)
-- [ ] Create `docs/TIKTOK_API_NOTES.md` with findings
+  - Image formats supported
+  - Video formats supported  - File size limits (usually handled by Publer)
+  - Album/carousel support for TikTok
+- [ ] Document rate limits (Publer's limits, not TikTok's)
+- [ ] Test API with sample requests (Postman/curl)
+- [ ] Create `docs/PUBLER_API_NOTES.md` with findings
 
-#### 4. Test Account Setup (30 minutes)
-- [ ] Create separate test TikTok business account
+#### 5. Test Account Setup (15 minutes)
+- [ ] Create separate test TikTok account (optional but recommended)
+- [ ] Connect test account to Publer
 - [ ] Use for development/testing to avoid spamming main account
 - [ ] Document test account credentials
 
@@ -112,18 +161,19 @@
   ```
 
 **✅ WEEK 0 CHECKPOINT**:
-- TikTok API application submitted
+- Publer account created and TikTok connected
+- Publer API key obtained
 - Research completed and documented
 - Redis ready
 - Test accounts configured
 - Caption bank created
-- **WAIT for API approval before proceeding to Week 1**
+- **Ready to start Week 1 immediately** (no waiting needed!)
 
 ---
 
-## 🗓️ WEEK 1: CORE INFRASTRUCTURE (After API Approval)
+## 🗓️ WEEK 1: CORE INFRASTRUCTURE (Start Immediately!)
 
-### **Day 1: Project Setup & Dependencies** (3-4 hours)
+### **Day 1: Project Setup & Dependencies** (2-3 hours)
 
 #### Morning: Dependencies Installation
 ```bash
@@ -133,32 +183,30 @@ npm install bottleneck  # For rate limiting
 ```
 
 #### Afternoon: Folder Structure
-Create new directories:
+Create implementation in existing `src/features/tiktok/`:
 ```
-src/
-├── tiktok/
-│   ├── auth.js          # OAuth & token management
-│   ├── uploader.js      # TikTok upload logic
-│   ├── validator.js     # Media validation
-│   └── captionManager.js # Random caption selection
+src/features/tiktok/
+├── services/
+│   ├── publlerClient.js     # Publer API client
+│   ├── uploader.js           # Upload orchestration
+│   ├── validator.js          # Media validation
+│   └── captionManager.js     # Random caption selection
 ├── queue/
-│   ├── producer.js      # Add jobs to queue
-│   └── worker.js        # Process upload jobs
-└── config.js            # Updated with TikTok settings
+│   ├── producer.js           # Add jobs to queue
+│   └── worker.js             # Process upload jobs
+└── handlers/
+    └── messageHandler.js     # Handle supplier group messages
 data/
-└── captions.json        # Caption templates
+└── captions.json             # Caption templates
 ```
 
 #### Evening: Environment Variables
 Update `.env`:
 ```bash
-# TikTok API Configuration
-TIKTOK_CLIENT_KEY=your_client_key
-TIKTOK_CLIENT_SECRET=your_client_secret
-TIKTOK_REDIRECT_URI=http://localhost:3000/auth/tiktok/callback
-TIKTOK_ACCESS_TOKEN=  # Will be filled after OAuth
-TIKTOK_REFRESH_TOKEN= # Will be filled after OAuth
-TIKTOK_TOKEN_EXPIRES_AT= # Timestamp
+# Publer API Configuration
+PUBLER_API_KEY=your_api_key_from_publer
+PUBLER_ACCOUNT_ID=your_tiktok_account_id  # From Publer dashboard
+PUBLER_BASE_URL=https://api.publer.io/v1  # API base URL
 
 # Redis Configuration
 UPSTASH_REDIS_URL=redis://default:xxx@xxx.upstash.io:6379
@@ -173,19 +221,16 @@ ENABLE_IMAGE_SEARCH=false  # Disable during TikTok implementation
 ENABLE_TIKTOK_UPLOAD=true
 ```
 
-Update `src/config.js`:
+Update `src/config/index.js`:
 ```javascript
 module.exports = {
   // ... existing config ...
 
-  // TikTok configuration
-  tiktok: {
-    clientKey: process.env.TIKTOK_CLIENT_KEY,
-    clientSecret: process.env.TIKTOK_CLIENT_SECRET,
-    redirectUri: process.env.TIKTOK_REDIRECT_URI,
-    accessToken: process.env.TIKTOK_ACCESS_TOKEN,
-    refreshToken: process.env.TIKTOK_REFRESH_TOKEN,
-    tokenExpiresAt: parseInt(process.env.TIKTOK_TOKEN_EXPIRES_AT || '0', 10),
+  // Publer/TikTok configuration
+  publer: {
+    apiKey: process.env.PUBLER_API_KEY,
+    accountId: process.env.PUBLER_ACCOUNT_ID,
+    baseUrl: process.env.PUBLER_BASE_URL || 'https://api.publer.io/v1',
     uploadDelayMs: parseInt(process.env.TIKTOK_UPLOAD_DELAY_MS || '60000', 10),
     maxRetries: parseInt(process.env.TIKTOK_MAX_RETRIES || '3', 10),
     retryDelayMs: parseInt(process.env.TIKTOK_RETRY_DELAY_MS || '300000', 10)
@@ -201,41 +246,45 @@ module.exports = {
 
 ---
 
-### **Day 2: TikTok Authentication** (5-6 hours)
+### **Day 2: Publer API Client** (3-4 hours)
 
-#### Create `src/tiktok/auth.js`
+#### Create `src/features/tiktok/services/publlerClient.js`
+
+**Much simpler than OAuth!** Just API key authentication.
 
 Implement:
-- [ ] OAuth 2.0 authorization flow
-- [ ] Token exchange (authorization code → access token)
-- [ ] Token refresh mechanism (auto-refresh before expiration)
-- [ ] Token storage (update `.env` file or use database)
-- [ ] Token validation
-- [ ] Automatic retry on auth errors
+- [ ] HTTP client with Publer API base URL
+- [ ] API key authentication (header-based)
+- [ ] Core API methods:
+  - `uploadMedia(filePath)` - Upload image/video to Publer
+  - `createPost(mediaIds, caption, accountId)` - Create TikTok post
+  - `getPostStatus(postId)` - Check post status
+  - `getAccounts()` - List connected social accounts
+- [ ] Error handling and retry logic
+- [ ] Rate limit handling
 
 **Key Functions**:
 ```javascript
-async function getAuthorizationUrl()  // Generate OAuth URL
-async function exchangeCodeForToken(code)  // Get initial tokens
-async function refreshAccessToken()  // Refresh expired token
-async function getValidAccessToken()  // Returns valid token (auto-refresh if needed)
-async function saveTokens(accessToken, refreshToken, expiresIn)  // Persist tokens
+async function uploadMedia(filePath)              // Upload file, return media ID
+async function createPost(mediaIds, caption)      // Create post, return post ID
+async function getPostStatus(postId)              // Check if published
+async function publishImmediately(mediaIds, caption)  // Upload & publish in one flow
 ```
 
-**OAuth Flow**:
-1. Generate authorization URL → User visits and approves
-2. Receive callback with authorization code
-3. Exchange code for access token + refresh token
-4. Save tokens to `.env`
-5. Set up automatic refresh (check before each upload)
+**Publer API Flow** (simplified):
+1. Upload media files → Get media IDs
+2. Create post with media IDs + caption → Get post ID
+3. Post automatically publishes to TikTok (or schedules if specified)
+4. Publer handles all TikTok authentication!
 
 **Testing**:
-- [ ] Run OAuth flow manually
-- [ ] Get initial access token
-- [ ] Test token refresh
-- [ ] Verify tokens saved correctly
+- [ ] Test API connection with valid API key
+- [ ] Upload sample image
+- [ ] Create test post
+- [ ] Verify post appears on TikTok
+- [ ] Test error handling
 
-**✅ DAY 2 CHECKPOINT**: OAuth working, tokens obtained and saved
+**✅ DAY 2 CHECKPOINT**: Publer API client working, test post successful
 
 ---
 
@@ -279,9 +328,9 @@ function formatCaption(caption)  // Ensure proper formatting
 
 ### **Day 4: Media Validator** (4-5 hours)
 
-#### Create `src/tiktok/validator.js`
+#### Create `src/features/tiktok/services/validator.js`
 
-Based on TikTok API requirements (from Week 0 research), implement:
+Based on TikTok/Publer requirements, implement:
 
 **Image Validation**:
 - [ ] Supported formats: JPEG, PNG, WEBP
@@ -318,46 +367,51 @@ async function getMediaDimensions(filePath)  // Width x height
 
 ---
 
-### **Day 5-6: TikTok Uploader** (10-12 hours)
+### **Day 5-6: TikTok Uploader via Publer** (6-8 hours)
 
-#### Create `src/tiktok/uploader.js`
+#### Create `src/features/tiktok/services/uploader.js`
 
-This is the core upload logic. Based on TikTok API documentation:
+**Simplified with Publer!** Publer handles all TikTok complexity.
 
 **For Photo Posts/Albums**:
 ```javascript
-async function uploadPhotoAlbum(imagePaths, caption) {
-  // Step 1: Initialize photo post
-  const initResponse = await initializePhotoPost(imagePaths.length)
+const { uploadMedia, createPost } = require('./publlerClient');
 
-  // Step 2: Upload each image
+async function uploadPhotoAlbum(imagePaths, caption) {
+  // Step 1: Upload all images to Publer
+  const mediaIds = [];
   for (const imagePath of imagePaths) {
-    await uploadImageToUrl(imagePath, initResponse.upload_url)
+    const mediaId = await uploadMedia(imagePath);
+    mediaIds.push(mediaId);
   }
 
-  // Step 3: Publish post
-  const publishResponse = await publishPhotoPost(initResponse.publish_id, caption)
+  // Step 2: Create post with all media (Publer creates carousel)
+  const post = await createPost({
+    mediaIds,
+    caption,
+    socialAccounts: [config.publer.accountId],  // TikTok account
+    publish: true  // Publish immediately (not schedule)
+  });
 
-  return publishResponse
+  return post;
 }
 ```
 
 **For Video Posts**:
 ```javascript
 async function uploadVideo(videoPath, caption) {
-  // Step 1: Initialize video upload
-  const initResponse = await initializeVideoUpload()
+  // Step 1: Upload video to Publer
+  const mediaId = await uploadMedia(videoPath);
 
-  // Step 2: Upload video file (chunked if large)
-  await uploadVideoChunks(videoPath, initResponse.upload_url)
+  // Step 2: Create post
+  const post = await createPost({
+    mediaIds: [mediaId],
+    caption,
+    socialAccounts: [config.publer.accountId],
+    publish: true
+  });
 
-  // Step 3: Check upload status
-  await waitForVideoProcessing(initResponse.video_id)
-
-  // Step 4: Publish video
-  const publishResponse = await publishVideo(initResponse.video_id, caption)
-
-  return publishResponse
+  return post;
 }
 ```
 
@@ -365,13 +419,11 @@ async function uploadVideo(videoPath, caption) {
 ```javascript
 async function uploadAlbum(mediaPaths, caption) {
   // Separate images and videos
-  const images = mediaPaths.filter(isImage)
-  const videos = mediaPaths.filter(isVideo)
+  const images = mediaPaths.filter(isImage);
+  const videos = mediaPaths.filter(isVideo);
 
-  // TikTok limitation: Can't mix images and videos in one post
-  // Strategy: Post images as album, videos separately
-
-  const results = []
+  // Check TikTok/Publer limitations for mixing media types
+  const results = [];
 
   if (images.length > 0) {
     const result = await uploadPhotoAlbum(images, caption)
@@ -1577,34 +1629,39 @@ After Week 4, the system should have:
 ## 💰 COST ESTIMATE
 
 ### Development
-- **Time**: 4-6 weeks
+- **Time**: 2-3 weeks (much faster without TikTok API approval!)
 - **Cost**: $0 (your time)
 
 ### Monthly Operating Costs
 | Service | Plan | Cost |
 |---------|------|------|
+| **Publer** | Pro tier (required for API) | **$10-15** |
 | Railway - Main Bot | 512MB | $5 |
 | Railway - Worker | 512MB | $5 |
 | Upstash Redis | Free tier | $0 |
-| TikTok API | Free | $0 |
-| **Total** | | **$10/month** |
+| **Total** | | **$20-25/month** |
 
 ### Scaling Costs (if needed)
 - Railway 1GB (both services): $20/month
 - Upstash paid tier: $10/month
-- **Total with scaling**: $30/month
+- Publer Business tier: $25/month
+- **Total with scaling**: $45-55/month
+
+### Cost Comparison
+- ✅ **With Publer**: $20-25/month, ready in 2-3 weeks
+- ❌ **With TikTok API**: $10/month, but 4-6 weeks wait + complex OAuth + risk of rejection
 
 ---
 
 ## 🚨 RISKS & MITIGATION
 
-### Risk 1: TikTok API doesn't support albums
-**Likelihood**: Medium
-**Impact**: High
-**Mitigation**: Research thoroughly in Week 0. If no album support, post images individually.
+### Risk 1: Publer API limitations
+**Likelihood**: Low
+**Impact**: Medium
+**Mitigation**: Test album support in Week 0. Publer documentation should clarify TikTok capabilities. Fallback: post images individually.
 
-### Risk 2: TikTok API approval delayed/rejected
-**Likelihood**: Medium
+### Risk 2: Publer service downtime
+**Likelihood**: Low
 **Impact**: High
 **Mitigation**: Apply immediately. Have fallback plan (manual posting service).
 
