@@ -235,7 +235,7 @@ class SupabaseHandler {
           group_id: groupId,
           group_name: groupName,
           last_checked: Math.floor(Date.now() / 1000)
-        }])
+        }], { onConflict: 'group_id' })
         .select();
 
       if (error) throw error;

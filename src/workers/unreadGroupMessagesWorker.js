@@ -30,60 +30,75 @@ function initializeWorker(client, db) {
     async (job) => {
       try {
         console.log(`\n🔄 Processing job: ${job.name}`);
-        const { messageId, groupId, groupName, timestamp, author, messageBody } = job.data;
+        const { messageIds, groupId, groupName, timestamp, author, messageBody, albumSize } = job.data;
 
-        // Retrieve the message from WhatsApp client
-        console.log(`📥 Retrieving message: ${messageId}`);
-        const message = await client.getMessageById(messageId);
+        console.log(`📦 Processing album with ${messageIds.length} message(s)`);
 
-        if (!message) {
-          console.error(`❌ Message not found: ${messageId}`);
-          return { success: false, error: 'Message not found' };
+        // Arrays to collect all media from all messages in album
+        const allVideos = [];
+        const allImages = [];
+
+        // Process each message in the album
+        for (const messageId of messageIds) {
+          try {
+            console.log(`📥 Retrieving message: ${messageId}`);
+            const message = await client.getMessageById(messageId);
+
+            if (!message) {
+              console.error(`❌ Message not found: ${messageId}`);
+              continue; // Skip this message, process others
+            }
+
+            // Download media
+            console.log(`📥 Downloading media from message...`);
+            const media = await message.downloadMedia();
+
+            if (!media) {
+              console.error(`❌ Failed to download media: ${messageId}`);
+              continue; // Skip this message, process others
+            }
+
+            // Categorize media and add to album arrays
+            categorizeMedia(media, allVideos, allImages);
+
+          } catch (err) {
+            console.error(`❌ Error processing message ${messageId}:`, err.message);
+            // Continue processing other messages
+          }
         }
 
-        // Download media
-        console.log(`📥 Downloading media from message...`);
-        const media = await message.downloadMedia();
+        console.log(`📊 Album totals: ${allVideos.length} videos, ${allImages.length} images`);
 
-        if (!media) {
-          console.error(`❌ Failed to download media: ${messageId}`);
-          return { success: false, error: 'Failed to download media' };
-        }
-
-        // Categorize media
-        const videos = [];
-        const images = [];
-        categorizeMedia(media, videos, images);
-
-        // Apply limits
-        const limitedVideos = videos.slice(0, MAX_VIDEOS);
-        const limitedImages = images.slice(0, MAX_IMAGES);
+        // Apply limits across entire album
+        const limitedVideos = allVideos.slice(0, MAX_VIDEOS);
+        const limitedImages = allImages.slice(0, MAX_IMAGES);
 
         // Log if items were dropped
-        if (videos.length > MAX_VIDEOS) {
-          console.log(`⚠️ Dropped ${videos.length - MAX_VIDEOS} videos (max ${MAX_VIDEOS})`);
+        if (allVideos.length > MAX_VIDEOS) {
+          console.log(`⚠️ Dropped ${allVideos.length - MAX_VIDEOS} videos (max ${MAX_VIDEOS})`);
         }
-        if (images.length > MAX_IMAGES) {
-          console.log(`⚠️ Dropped ${images.length - MAX_IMAGES} images (max ${MAX_IMAGES})`);
+        if (allImages.length > MAX_IMAGES) {
+          console.log(`⚠️ Dropped ${allImages.length - MAX_IMAGES} images (max ${MAX_IMAGES})`);
         }
 
         const finalResult = {
           success: true,
-          messageId,
+          messageIds: messageIds,
           groupId,
           groupName,
           timestamp,
           author,
           messageBody,
+          albumSize: messageIds.length,
           videos: limitedVideos,
           images: limitedImages,
           totalMedia: limitedVideos.length + limitedImages.length,
-          droppedVideos: Math.max(0, videos.length - MAX_VIDEOS),
-          droppedImages: Math.max(0, images.length - MAX_IMAGES),
+          droppedVideos: Math.max(0, allVideos.length - MAX_VIDEOS),
+          droppedImages: Math.max(0, allImages.length - MAX_IMAGES),
         };
 
         console.log(`✅ Job completed: ${job.name}`);
-        console.log(`📊 Result: ${finalResult.videos.length} videos, ${finalResult.images.length} images`);
+        console.log(`📊 Final result: ${finalResult.videos.length} videos, ${finalResult.images.length} images (from ${messageIds.length} message(s))`);
         console.log(`✅ Job ${job.id} marked as done`);
 
         return finalResult;

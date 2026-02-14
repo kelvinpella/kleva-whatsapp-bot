@@ -7,7 +7,8 @@ require('dotenv').config();
 
 const { initializeClient, setupEventHandlers, startClient, listChats, destroyClient } = require('./core/whatsapp');
 const DatabaseHandler = require('./core/database');
-const { handleGroupMessage, handlePrivateMessage } = require('./features/imageSearch/handlers/messageHandler');
+const { handleGroupMessage } = require('./features/tiktok/groupMessageHandler');
+const { handlePrivateMessage } = require('./features/imageSearch/handlers/privateMessageHandler');
 const { initializeWorker } = require('./workers/unreadGroupMessagesWorker');
 
 let client = null;
