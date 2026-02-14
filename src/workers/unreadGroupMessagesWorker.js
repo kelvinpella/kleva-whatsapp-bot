@@ -10,6 +10,7 @@
 
 const { Worker } = require('bullmq');
 const Redis = require('ioredis');
+const { uploadMediaToStorage } = require('./mediaUploader');
 
 const MAX_VIDEOS = 2;
 const MAX_IMAGES = 10;
@@ -81,6 +82,15 @@ function initializeWorker(client, db) {
           console.log(`⚠️ Dropped ${allImages.length - MAX_IMAGES} images (max ${MAX_IMAGES})`);
         }
 
+        // Upload media to Supabase Storage and get public URLs
+        const { uploadedVideos, uploadedImages } = await uploadMediaToStorage({
+          db,
+          videos: limitedVideos,
+          images: limitedImages,
+          groupId,
+          timestamp
+        });
+
         const finalResult = {
           success: true,
           messageIds: messageIds,
@@ -90,15 +100,17 @@ function initializeWorker(client, db) {
           author,
           messageBody,
           albumSize: messageIds.length,
-          videos: limitedVideos,
-          images: limitedImages,
-          totalMedia: limitedVideos.length + limitedImages.length,
+          videos: uploadedVideos,
+          images: uploadedImages,
+          totalMedia: uploadedVideos.length + uploadedImages.length,
           droppedVideos: Math.max(0, allVideos.length - MAX_VIDEOS),
           droppedImages: Math.max(0, allImages.length - MAX_IMAGES),
         };
 
         console.log(`✅ Job completed: ${job.name}`);
         console.log(`📊 Final result: ${finalResult.videos.length} videos, ${finalResult.images.length} images (from ${messageIds.length} message(s))`);
+        console.log(`📹 Video URLs:`, uploadedVideos.map(v => v.url));
+        console.log(`📸 Image URLs:`, uploadedImages.map(i => i.url));
         console.log(`✅ Job ${job.id} marked as done`);
 
         return finalResult;
