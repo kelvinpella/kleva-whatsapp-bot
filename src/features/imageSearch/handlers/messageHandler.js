@@ -9,8 +9,97 @@
  * 4. Associate with group_id, date_posted
  */
 
-const { processGroupImages, shouldProcessMessage } = require('../services/imageProcessor');
-const config = require('../../../config');
+const { Queue } = require('bullmq');
+const Redis = require('ioredis');
+
+// Initialize Redis connection
+const redisConnection = new Redis({
+  maxRetriesPerRequest: null,
+});
+
+// Initialize BullMQ queue for unread group messages
+const unreadGroupMessagesQueue = new Queue('unreadGroupMessages', {
+  connection: redisConnection,
+});
+
+/**
+ * Handle incoming group messages
+ * - Filters messages from allowed groups only
+ * - Checks for media content
+ * - Adds media messages to BullMQ queue for processing
+ *
+ * @param {Object} msg - WhatsApp message
+ * @param {Object} db - Supabase database handler
+ * @param {Object} client - WhatsApp client
+ */
+async function handleGroupMessage(msg, db, client) {
+  const groupId = msg.from;
+
+  try {
+    // Get allowed groups from environment variable
+    // Format supports: "GroupName:GroupID" or just "GroupID"
+    const allowedGroupsString = process.env.ALLOWED_GROUPS || '';
+    const allowedGroups = allowedGroupsString
+      .split(',')
+      .map(entry => {
+        const trimmed = entry.trim();
+        // If format is "Name:ID", extract just the ID part
+        return trimmed.includes(':') ? trimmed.split(':')[1].trim() : trimmed;
+      })
+      .filter(id => id.length > 0);
+
+    // Check if this group is in the allowed list
+    if (!allowedGroups.includes(groupId)) {
+      console.log(`⏭️ Ignoring message from non-allowed group: ${groupId}`);
+      return;
+    }
+
+    // Get group name for logging
+    const chat = await msg.getChat();
+    const groupName = chat.name || msg.groupMetadata?.subject || 'Unknown Group';
+
+    console.log(`\n📨 Received message from allowed group: ${groupName} (${groupId})`);
+
+    // Check if message contains media
+    if (!msg.hasMedia) {
+      console.log(`⏭️ Message has no media, ignoring...`);
+      return;
+    }
+
+    // Message has media - queue immediately for processing
+    console.log(`📸 Message contains media, adding to queue...`);
+
+    const jobData = {
+      messageId: msg.id._serialized,
+      groupId: groupId,
+      groupName: groupName,
+      timestamp: msg.timestamp,
+      author: msg.author || msg.from,
+      messageBody: msg.body || '',
+      // Media will be downloaded by the worker when processing
+    };
+
+    await unreadGroupMessagesQueue.add(`processGroupMedia-${msg.id._serialized}`, jobData, {
+      attempts: 3,
+      backoff: {
+        type: 'exponential',
+        delay: 2000,
+      },
+    });
+
+    console.log(`✅ Message queued: ${groupName}`);
+
+  } catch (err) {
+    console.error('Error handling group message:', err.message);
+  }
+}
+
+/* ========================================
+ * PREVIOUS IMPLEMENTATION (COMMENTED OUT)
+ * ========================================
+
+// const { processGroupImages, shouldProcessMessage } = require('../services/imageProcessor');
+// const config = require('../../../config');
 
 const MAX_IMAGES_PER_MESSAGE = 2;
 const BATCH_WINDOW_SECONDS = 30;
@@ -48,24 +137,14 @@ function tryReserveSlot(groupId, author, timestamp) {
   return count <= MAX_IMAGES_PER_MESSAGE;
 }
 
-/**
- * Handle incoming group messages
- * - Detects and processes images from supplier groups
- * - Validates handbags with COCO-SSD
- * - Saves to database with metadata
- *
- * @param {Object} msg - WhatsApp message
- * @param {Object} db - Supabase database handler
- * @param {Object} client - WhatsApp client
- */
 async function handleGroupMessage(msg, db, client) {
   const groupId = msg.from; // Use message.from (more reliable)
-  
+
   try {
     // Get accurate group name from chat object
     const chat = await msg.getChat();
     const groupName = chat.name || msg.groupMetadata?.subject || 'Unknown Group';
-    
+
     console.log(`\n📨 Received message in group: ${groupName} (${groupId})`);
     // Check if this message should be processed for images
     const shouldProcess = shouldProcessMessage(msg, config.supplierGroupIds);
@@ -166,6 +245,11 @@ async function handleGroupMessage(msg, db, client) {
     console.error('Error handling group message:', err.message);
   }
 }
+
+========================================
+ * END PREVIOUS IMPLEMENTATION
+ * ========================================
+*/
 
 // Track search album batches (similar to group image batching)
 const searchBatchWindow = new Map(); // Tracks if we're in a search batch

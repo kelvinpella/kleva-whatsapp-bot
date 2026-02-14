@@ -8,9 +8,11 @@ require('dotenv').config();
 const { initializeClient, setupEventHandlers, startClient, listChats, destroyClient } = require('./core/whatsapp');
 const DatabaseHandler = require('./core/database');
 const { handleGroupMessage, handlePrivateMessage } = require('./features/imageSearch/handlers/messageHandler');
+const { initializeWorker } = require('./workers/unreadGroupMessagesWorker');
 
 let client = null;
 let db = null;
+let worker = null;
 
 /**
  * Start the bot
@@ -30,6 +32,10 @@ async function startBot() {
       onReady: async () => {
         // List all chats when ready
         await listChats(client, db);
+
+        // Initialize BullMQ worker for processing queued messages
+        console.log('🔧 Initializing message queue worker...');
+        worker = initializeWorker(client, db);
       },
       onMessage: async (msg) => {
         // Route messages based on type (group vs private)
@@ -40,7 +46,9 @@ async function startBot() {
           await handleGroupMessage(msg, db, client);
         } else {
           // Private message - handle search queries
-          await handlePrivateMessage(msg, db, client);
+          // TODO Will implement image search in private chats
+          // await handlePrivateMessage(msg, db, client);
+          console.log('Received private message - search functionality not implemented yet');
         }
       },
       onDisconnected: (reason) => {
@@ -68,6 +76,12 @@ async function shutdown() {
   console.log('\n🛑 Shutting down gracefully...');
 
   try {
+    // Close BullMQ worker
+    if (worker) {
+      console.log('Closing worker...');
+      await worker.close();
+    }
+
     // Close database connection
     if (db && db.close) {
       await db.close();

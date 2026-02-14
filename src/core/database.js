@@ -1,5 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
-const { findSimilarProductsTensorFlow, findSimilarProductsMultiFeature } = require('./utils/similarity');
+// const { findSimilarProductsTensorFlow, findSimilarProductsMultiFeature } = require('./utils/similarity');
 
 class SupabaseHandler {
   constructor() {
@@ -104,6 +104,7 @@ class SupabaseHandler {
     }
   }
 
+  /* COMMENTED OUT - Not needed for current queue-based implementation
   async searchSimilarProducts(searchEmbedding, minSimilarity = 0.65, limit = 5) {
     try {
       // Extract embedding array (1280-dim vector from MobileNet v2)
@@ -137,7 +138,9 @@ class SupabaseHandler {
       return [];
     }
   }
+  */
 
+  /* COMMENTED OUT - Not needed for current queue-based implementation
   async searchSimilarProductsMultiFeature(searchFeatures, minSimilarity = 0.70, limit = 5) {
     try {
       // Validate search features
@@ -178,6 +181,7 @@ class SupabaseHandler {
       return [];
     }
   }
+  */
 
   async updateProduct(id, data) {
     try {
