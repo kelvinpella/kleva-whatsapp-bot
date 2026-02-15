@@ -1,41 +1,96 @@
 /**
  * Media Uploader Utility
- * Handles uploading media files to Supabase Storage
+ * Handles uploading media files directly to Publer
  */
 
+const axios = require('axios');
+const FormData = require('form-data');
 const { processVideos } = require('./videoProcessor');
 
+const PUBLER_API_BASE = 'https://app.publer.com/api/v1';
+const PUBLER_API_KEY = process.env.PUBLER_API_KEY;
+const PUBLER_WORKSPACE_ID = process.env.PUBLER_WORKSPACE_ID;
+
 /**
- * Upload media files to Supabase Storage and get public URLs
+ * Upload single media file to Publer
+ * @param {Buffer} buffer - Media file buffer
+ * @param {string} filename - Filename with extension
+ * @param {string} mimetype - MIME type
+ * @returns {Promise<Object>} Media object with id, path, etc.
+ */
+async function uploadSingleMedia(buffer, filename, mimetype) {
+  try {
+    const formData = new FormData();
+    formData.append('file', buffer, {
+      filename: filename,
+      contentType: mimetype,
+    });
+    formData.append('direct_upload', 'false');
+    formData.append('in_library', 'true');
+
+    const response = await axios.post(
+      `${PUBLER_API_BASE}/media`,
+      formData,
+      {
+        headers: {
+          'Authorization': `Bearer-API ${PUBLER_API_KEY}`,
+          'Publer-Workspace-Id': PUBLER_WORKSPACE_ID,
+          ...formData.getHeaders(),
+        },
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+      }
+    );
+
+    console.log(`✅ Uploaded to Publer: ${filename} (ID: ${response.data.id})`);
+    return response.data;
+
+  } catch (error) {
+    console.error(`❌ Failed to upload ${filename}:`, error.response?.data || error.message);
+    throw error;
+  }
+}
+
+/**
+ * Upload media files directly to Publer and get media IDs
  * @param {Object} params - Upload parameters
- * @param {Object} params.db - Database handler with Supabase client
  * @param {Array} params.videos - Array of video objects with mimetype and data
  * @param {Array} params.images - Array of image objects with mimetype and data
- * @param {string} params.groupId - WhatsApp group ID
  * @param {number} params.timestamp - Message timestamp
- * @returns {Promise<Object>} Object with uploadedVideos and uploadedImages arrays
+ * @returns {Promise<Object>} Object with uploadedVideos and uploadedImages arrays containing Publer media IDs
  */
-async function uploadMediaToStorage({ db, videos, images, groupId, timestamp }) {
-  console.log(`📤 Uploading ${videos.length} videos and ${images.length} images to Supabase Storage...`);
+async function uploadMediaToPubler({ videos, images, timestamp }) {
+  console.log(`📤 Uploading ${videos.length} videos and ${images.length} images to Publer...`);
 
   // Mute videos before uploading
   const mutedVideos = await processVideos(videos);
 
-  const currentDate = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
   const uploadPromises = [];
 
   // Upload muted videos
   mutedVideos.forEach((video, index) => {
     const extension = getFileExtension(video.mimetype);
     const filename = `pochi_kali_video_${timestamp}_${index}.${extension}`;
-    const path = `videos/${currentDate}/${groupId}/${filename}`;
+    const buffer = Buffer.from(video.data, 'base64');
 
     uploadPromises.push(
-      uploadToSupabase(db, video.data, path, video.mimetype)
-        .then(url => ({ ...video, url, path }))
+      uploadSingleMedia(buffer, filename, video.mimetype)
+        .then(publerMedia => ({
+          ...video,
+          publerId: publerMedia.id,
+          publerPath: publerMedia.path,
+          publerThumbnail: publerMedia.thumbnail,
+          type: publerMedia.type,
+          width: publerMedia.width,
+          height: publerMedia.height,
+        }))
         .catch(err => {
           console.error(`❌ Failed to upload video ${index}:`, err.message);
-          return { ...video, url: null, path, error: err.message };
+          return {
+            ...video,
+            publerId: null,
+            error: err.message
+          };
         })
     );
   });
@@ -44,14 +99,26 @@ async function uploadMediaToStorage({ db, videos, images, groupId, timestamp }) 
   images.forEach((image, index) => {
     const extension = getFileExtension(image.mimetype);
     const filename = `pochi_kali_image_${timestamp}_${index}.${extension}`;
-    const path = `images/${currentDate}/${groupId}/${filename}`;
+    const buffer = Buffer.from(image.data, 'base64');
 
     uploadPromises.push(
-      uploadToSupabase(db, image.data, path, image.mimetype)
-        .then(url => ({ ...image, url, path }))
+      uploadSingleMedia(buffer, filename, image.mimetype)
+        .then(publerMedia => ({
+          ...image,
+          publerId: publerMedia.id,
+          publerPath: publerMedia.path,
+          publerThumbnail: publerMedia.thumbnail,
+          type: publerMedia.type,
+          width: publerMedia.width,
+          height: publerMedia.height,
+        }))
         .catch(err => {
           console.error(`❌ Failed to upload image ${index}:`, err.message);
-          return { ...image, url: null, path, error: err.message };
+          return {
+            ...image,
+            publerId: null,
+            error: err.message
+          };
         })
     );
   });
@@ -60,10 +127,10 @@ async function uploadMediaToStorage({ db, videos, images, groupId, timestamp }) 
   const uploadedMedia = await Promise.all(uploadPromises);
 
   // Separate videos and images from uploaded media
-  const uploadedVideos = uploadedMedia.slice(0, videos.length);
-  const uploadedImages = uploadedMedia.slice(videos.length);
+  const uploadedVideos = uploadedMedia.slice(0, mutedVideos.length);
+  const uploadedImages = uploadedMedia.slice(mutedVideos.length);
 
-  console.log(`✅ Uploaded ${uploadedVideos.length} videos and ${uploadedImages.length} images`);
+  console.log(`✅ Uploaded to Publer: ${uploadedVideos.length} videos, ${uploadedImages.length} images`);
 
   return {
     uploadedVideos,
@@ -92,47 +159,6 @@ function getFileExtension(mimetype) {
   return mimetypeMap[mimetype] || 'bin';
 }
 
-/**
- * Upload media to Supabase Storage
- * @param {Object} db - Database handler with Supabase client
- * @param {string} base64Data - Base64 encoded media data
- * @param {string} path - Storage path (e.g., 'videos/2024-02-14/groupId/video.mp4')
- * @param {string} mimetype - MIME type for content-type header
- * @returns {Promise<string>} Public URL of uploaded file
- */
-async function uploadToSupabase(db, base64Data, path, mimetype) {
-  try {
-    // Convert base64 to Buffer
-    const buffer = Buffer.from(base64Data, 'base64');
-
-    // Upload to Supabase Storage bucket 'handbags'
-    const { error } = await db.supabase.storage
-      .from('handbags')
-      .upload(path, buffer, {
-        contentType: mimetype,
-        upsert: false, // Don't overwrite existing files
-      });
-
-    if (error) {
-      throw error;
-    }
-
-    // Get public URL
-    const { data: publicUrlData } = db.supabase.storage
-      .from('handbags')
-      .getPublicUrl(path);
-
-    console.log(`✅ Uploaded: ${path}`);
-    return publicUrlData.publicUrl;
-
-  } catch (error) {
-    console.error(`❌ Upload failed for ${path}:`, error.message);
-    throw error;
-  }
-}
-
 module.exports = {
-  uploadMediaToStorage,
-  getFileExtension,
-  uploadToSupabase
+  uploadMediaToPubler
 };
