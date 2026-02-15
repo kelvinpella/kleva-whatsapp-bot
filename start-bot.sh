@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# Startup script for WhatsApp bot with Node v20
-# This ensures TensorFlow.js works correctly
+# Startup script for WhatsApp bot with Node v24 (latest LTS)
+# Ensures compatibility with all dependencies
 
-echo "🚀 Starting WhatsApp bot with Node.js v20..."
+echo "🚀 Starting WhatsApp bot with Node.js v24 LTS..."
 echo
 
 # Start Redis server
@@ -21,8 +21,8 @@ echo
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
 
-# Use Node v20
-nvm use 20
+# Use Node v24 (latest LTS)
+nvm use 24
 
 # Verify version
 echo "Node version: $(node --version)"

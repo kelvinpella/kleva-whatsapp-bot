@@ -1,14 +1,14 @@
 {
-  "name": "whatsapp-image-search",
+  "name": "kleva-whatsapp-bot",
   "version": "1.0.0",
-  "description": "Image search from whatsapp groups",
+  "description": "A whatsApp bot to automate various tasks for Kleva Business",
   "license": "ISC",
   "author": "",
   "type": "commonjs",
   "main": "src/index.js",
   "engines": {
-    "node": ">=18.0.0 <=22.x",
-    "npm": ">=9.0.0"
+    "node": ">=24.0.0",
+    "npm": ">=10.0.0"
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
@@ -18,7 +18,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.95.3",
     "@tensorflow-models/mobilenet": "^2.1.1",
-    "@tensorflow/tfjs-node": "^4.22.0",
+    "@tensorflow/tfjs-node": "^0.1.11",
     "axios": "^1.13.5",
     "bullmq": "^5.69.1",
     "dotenv": "^17.2.4",
