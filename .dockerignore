@@ -1,0 +1,47 @@
+# Dependencies
+node_modules
+
+# Development files
+.git
+.github
+.vscode
+.idea
+
+# Documentation and examples
+*.md
+README.md
+docs/
+*.txt
+.env.example
+
+# Test files
+test/
+tests/
+*.test.js
+*.spec.js
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.swp
+*.swo
+.wh..*
+
+# Session data (generated at runtime)
+.wwebjs_auth/
+.wwebjs_cache/
+
+# Scripts for local development only
+start-bot.sh

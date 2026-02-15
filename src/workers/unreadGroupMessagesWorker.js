@@ -154,38 +154,6 @@ function initializeWorker(client, db) {
   return worker;
 }
 
-/* COMMENTED OUT - No longer needed, processing happens in worker loop
-function processMedia(media) {
-  const videos = [];
-  const images = [];
-
-  // Single media item
-  if (media.mimetype) {
-    categorizeMedia(media, videos, images);
-  }
-
-  // Apply limits: max 2 videos, max 10 images
-  const limitedVideos = videos.slice(0, MAX_VIDEOS);
-  const limitedImages = images.slice(0, MAX_IMAGES);
-
-  // Log if items were dropped
-  if (videos.length > MAX_VIDEOS) {
-    console.log(`⚠️ Dropped ${videos.length - MAX_VIDEOS} videos (max ${MAX_VIDEOS})`);
-  }
-  if (images.length > MAX_IMAGES) {
-    console.log(`⚠️ Dropped ${images.length - MAX_IMAGES} images (max ${MAX_IMAGES})`);
-  }
-
-  return {
-    videos: limitedVideos,
-    images: limitedImages,
-    totalMedia: limitedVideos.length + limitedImages.length,
-    droppedVideos: Math.max(0, videos.length - MAX_VIDEOS),
-    droppedImages: Math.max(0, images.length - MAX_IMAGES),
-  };
-}
-*/
-
 /**
  * Categorize media item as video or image
  * @param {Object} media - Media object with mimetype and data

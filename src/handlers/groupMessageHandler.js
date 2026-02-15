@@ -10,8 +10,8 @@
 
 const { Queue } = require('bullmq');
 const Redis = require('ioredis');
-const { addMessageToBatch } = require('../../../utils/albumBatcher');
-const { shouldProcessMessage } = require('../../../utils/messageFilter');
+const { addMessageToBatch } = require('../utils/albumBatcher');
+const { shouldProcessMessage } = require('../utils/messageFilter');
 
 // Initialize Redis connection
 const redisConnection = new Redis({

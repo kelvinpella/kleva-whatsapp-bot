@@ -1,14 +1,13 @@
 /**
  * Main Entry Point
- * WhatsApp Image Search Bot with TikTok Auto-Upload
+ * WhatsApp Bot with TikTok Auto-Upload
  */
 
 require('dotenv').config();
 
 const { initializeClient, setupEventHandlers, startClient, listChats, destroyClient } = require('./core/whatsapp');
 const DatabaseHandler = require('./core/database');
-const { handleGroupMessage } = require('./features/imageSearch/handlers/groupMessageHandler');
-const { handlePrivateMessage } = require('./features/imageSearch/handlers/privateMessageHandler');
+const { handleGroupMessage } = require('./handlers/groupMessageHandler');
 const { initializeWorker } = require('./workers/unreadGroupMessagesWorker');
 
 let client = null;
@@ -43,13 +42,11 @@ async function startBot() {
         const chat = await msg.getChat();
 
         if (chat.isGroup) {
-          // Group message - handle image indexing or TikTok upload
+          // Group message - handle TikTok upload
           await handleGroupMessage(msg, db, client);
         } else {
-          // Private message - handle search queries
-          // TODO Will implement image search in private chats
-          // await handlePrivateMessage(msg, db, client);
-          console.log('Received private message - search functionality not implemented yet');
+          // Private messages not supported
+          console.log('Received private message - not supported');
         }
       },
       onDisconnected: (reason) => {

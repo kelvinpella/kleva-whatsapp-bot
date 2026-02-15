@@ -1,5 +1,4 @@
 const { createClient } = require('@supabase/supabase-js');
-// const { findSimilarProductsTensorFlow, findSimilarProductsMultiFeature } = require('./utils/similarity');
 
 class SupabaseHandler {
   constructor() {
@@ -50,10 +49,6 @@ class SupabaseHandler {
         currency: data.currency || 'TZS',
         brand: data.brand || null,
         bag_type: data.bagType || null,
-        embedding: data.embedding || null,
-        embedding_hash: data.embeddingHash || null,
-        texture_features: data.textureFeatures || null,   // NEW: 16-dim edge histogram
-        color_features: data.colorFeatures || null,       // NEW: 6-dim RGB stats
         message_timestamp: data.messageTimestamp || Math.floor(Date.now() / 1000),
         indexed_at: Math.floor(Date.now() / 1000)
       };
@@ -104,93 +99,12 @@ class SupabaseHandler {
     }
   }
 
-  /* COMMENTED OUT - Not needed for current queue-based implementation
-  async searchSimilarProducts(searchEmbedding, minSimilarity = 0.65, limit = 5) {
-    try {
-      // Extract embedding array (1280-dim vector from MobileNet v2)
-      const embedding = typeof searchEmbedding === 'object' && searchEmbedding.embedding
-        ? searchEmbedding.embedding
-        : searchEmbedding;
-
-      // Validate embedding format (MobileNet v2 = 1280 dimensions)
-      if (!Array.isArray(embedding) || embedding.length !== 1280) {
-        console.error(`Invalid search embedding: expected 1280-dimensional array, got ${embedding?.length}`);
-        return [];
-      }
-
-      // Fetch recent products from database
-      const { data: products, error } = await this.supabase
-        .from('products')
-        .select()
-        .order('indexed_at', { ascending: false })
-        .limit(500);
-
-      if (error) throw error;
-      if (!products || products.length === 0) return [];
-
-      // Use TensorFlow semantic similarity (pure cosine on 512-dim vectors)
-      // Background-invariant, focuses on object content
-      // Recommended threshold: 0.65-0.75 for semantic embeddings
-      const results = findSimilarProductsTensorFlow(embedding, products, minSimilarity);
-      return results.slice(0, limit);
-    } catch (err) {
-      console.error('Error searching similar products:', err.message);
-      return [];
-    }
-  }
-  */
-
-  /* COMMENTED OUT - Not needed for current queue-based implementation
-  async searchSimilarProductsMultiFeature(searchFeatures, minSimilarity = 0.70, limit = 5) {
-    try {
-      // Validate search features
-      const { embedding, textureFeatures, colorFeatures } = searchFeatures;
-
-      if (!Array.isArray(embedding) || embedding.length !== 1280) {
-        console.error(`Invalid semantic embedding: expected 1280-dimensional array, got ${embedding?.length}`);
-        return [];
-      }
-
-      if (!Array.isArray(textureFeatures) || textureFeatures.length !== 16) {
-        console.error(`Invalid texture features: expected 16-dimensional array, got ${textureFeatures?.length}`);
-        return [];
-      }
-
-      if (!Array.isArray(colorFeatures) || colorFeatures.length !== 6) {
-        console.error(`Invalid color features: expected 6-dimensional array, got ${colorFeatures?.length}`);
-        return [];
-      }
-
-      // Fetch recent products from database (include new feature columns)
-      const { data: products, error } = await this.supabase
-        .from('products')
-        .select('*')
-        .order('indexed_at', { ascending: false })
-        .limit(500);
-
-      if (error) throw error;
-      if (!products || products.length === 0) return [];
-
-      // Use multi-feature similarity matching (semantic + texture + color)
-      // Weighted: 60% semantic, 25% texture, 15% color
-      // Background-invariant, captures shape, surface patterns, and color
-      const results = findSimilarProductsMultiFeature(searchFeatures, products, minSimilarity);
-      return results.slice(0, limit);
-    } catch (err) {
-      console.error('Error searching similar products (multi-feature):', err.message);
-      return [];
-    }
-  }
-  */
-
   async updateProduct(id, data) {
     try {
       const updates = {
         updated_at: new Date().toISOString()
       };
 
-      if (data.embedding) updates.embedding = data.embedding;
-      if (data.embeddingHash) updates.embedding_hash = data.embeddingHash;
       if (data.thumbnail_path) updates.thumbnail_path = data.thumbnail_path;
       if (data.price !== undefined) updates.price = data.price;
       if (data.brand) updates.brand = data.brand;
@@ -298,7 +212,6 @@ class SupabaseHandler {
         .from('search_history')
         .insert([{
           search_image_path: data.imagePath || null,
-          search_embedding_hash: data.embeddingHash || null,
           results_count: data.resultsCount || 0,
           top_match_id: data.topMatchId || null,
           top_match_score: data.topMatchScore || null,
