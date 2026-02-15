@@ -18,7 +18,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.95.3",
     "@tensorflow-models/mobilenet": "^2.1.1",
-    "@tensorflow/tfjs-node": "^0.1.11",
+    "@tensorflow/tfjs-node": "^4.9.0",
     "axios": "^1.13.5",
     "bullmq": "^5.69.1",
     "dotenv": "^17.2.4",
