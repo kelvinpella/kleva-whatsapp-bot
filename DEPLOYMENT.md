@@ -1,6 +1,6 @@
 # Railway Deployment Guide
 
-Complete guide to deploying the WhatsApp Handbag Search Bot to Railway.app
+Complete guide to deploying the WhatsApp to TikTok Auto-Publisher Bot to Railway.app
 
 ## Prerequisites
 
@@ -56,28 +56,31 @@ Go to your project → Variables tab → Add the following:
 # Environment
 NODE_ENV=production
 
-# Bot Configuration
+# WhatsApp Configuration
 YOUR_PHONE_NUMBER=+255XXXXXXXXXX
-CLEANUP_DAYS=30
-MIN_SIMILARITY=0.4
+ALLOWED_GROUPS=Kleva Pochi Kali:120363424482974321@g.us,Supplier2:120363123456789012@g.us
 
-# Image Processing
-HANDBAG_CONFIDENCE_THRESHOLD=0.5
-MAX_IMAGES_PER_MESSAGE=2
-MAX_IMAGE_SIZE_KB=5000
+# Publer API Configuration (Required for TikTok Publishing)
+PUBLER_API_KEY=your_publer_api_key_here
+PUBLER_WORKSPACE_ID=your_workspace_id
+TIKTOK_ACCOUNT_ID=your_tiktok_account_id
 
-# Supabase Configuration
-SUPABASE_URL=https://your-project-id.supabase.co
-SUPABASE_KEY=your_supabase_anon_key_here
-SUPABASE_STORAGE_BUCKET=handbags
+# Redis Configuration (BullMQ Queue)
+REDIS_HOST=redis.railway.internal  # Or use Railway Redis service
+REDIS_PORT=6379
 ```
 
-**⚠️ Important:** Replace `SUPABASE_KEY` with your actual Supabase anon/public key
+**⚠️ Important:**
+- Get Publer API key from: https://app.publer.com/settings/api
+- Connect TikTok account in Publer workspace first
+- Get TikTok Account ID from Publer API or dashboard
+- Railway provides Redis as a service - add it to your project
 
-### 3.2 Optional: Supplier Group IDs (if needed in future)
+### 3.2 Optional: Media Processing Limits
 
 ```env
-SUPPLIER_GROUP_IDS=120363424482974321@g.us,120363123456789012@g.us
+MAX_VIDEOS=2
+MAX_IMAGES=10
 ```
 
 ---
@@ -172,24 +175,33 @@ Wait for log message:
 
 ## Step 7: Test the Bot
 
-### 7.1 Test Image Indexing (Supplier Groups)
+### 7.1 Test in Development Mode
 
-1. Post a handbag image in one of your supplier WhatsApp groups
-2. Check Railway logs for processing messages:
+1. Set `NODE_ENV=development` in Railway variables
+2. Send media with `/bottest` in message body to allowed groups
+3. Check Railway logs for processing:
    ```
-   📨 New message from [group_id]
-   🖼️  Processing images from [group_name]
-   ✅ Saved image to database
+   🧪 [DEV MODE] Processing test message with /bottest
+   📸 Message contains media, adding to album batch...
+   📦 Processing album with X message(s)
+   📤 Uploading to Publer...
+   🚀 Publishing to TikTok...
    ```
 
-### 7.2 Test Image Search (Private Chat)
+### 7.2 Test TikTok Publishing (Production)
 
-1. Send a handbag image with `/search` to the bot's WhatsApp number
-2. Wait for response with:
-   - Supplier name
-   - Image
-   - Date posted
-   - Match percentage
+1. Set `NODE_ENV=production` in Railway variables
+2. Post handbag videos/images in allowed WhatsApp groups (without `/bottest`)
+3. Check Railway logs for:
+   ```
+   📹 Video Publer IDs: [id1, id2]
+   📸 Image Publer IDs: [id1, id2, ...]
+   📹 Publishing 2 video(s) to TikTok...
+   ✅ Video 1/2 published successfully
+   🖼️ Publishing 5 image(s) as carousel to TikTok...
+   ✅ Carousel published successfully
+   ```
+4. Verify posts on TikTok with supplier code hashtag (e.g., `#KLEHK1502`)
 
 ---
 
@@ -249,13 +261,31 @@ Railway dashboard → Usage tab
 - Check image processing isn't leaking memory
 - Verify cleanup tasks are running
 
-### Issue: Images not saving to Supabase
+### Issue: Media not uploading to Publer
 
 **Solution:**
-- Verify `SUPABASE_KEY` is correct in Railway variables
-- Check Supabase storage bucket exists (`handbags`)
-- Verify Supabase storage policies allow uploads
-- Check Railway logs for specific error messages
+- Verify `PUBLER_API_KEY` is correct in Railway variables
+- Check `PUBLER_WORKSPACE_ID` and `TIKTOK_ACCOUNT_ID` are set
+- Verify TikTok account is connected in Publer workspace
+- Check Railway logs for specific Publer API error messages
+- Verify Publer API rate limits (100 requests/2 minutes)
+
+### Issue: TikTok posts failing
+
+**Solution:**
+- Check Publer media IDs are valid
+- Verify TikTok account authorization in Publer
+- Check content templates have valid descriptions
+- Verify hashtag generation is working correctly
+- Review Publer dashboard for failed jobs
+
+### Issue: Redis connection errors
+
+**Solution:**
+- Add Redis service to Railway project
+- Update `REDIS_HOST` to Railway internal hostname
+- Verify Redis port is 6379
+- Check Railway service linking
 
 ---
 
@@ -263,16 +293,28 @@ Railway dashboard → Usage tab
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `NODE_ENV` | Yes | `development` | Set to `production` for Railway |
-| `YOUR_PHONE_NUMBER` | Yes | - | Your WhatsApp number (international format) |
-| `SUPABASE_URL` | Yes | - | Your Supabase project URL |
-| `SUPABASE_KEY` | Yes | - | Your Supabase anon/public key |
-| `SUPABASE_STORAGE_BUCKET` | Yes | `handbags` | Supabase storage bucket name |
-| `MIN_SIMILARITY` | No | `0.7` | Minimum match threshold (0.0-1.0) |
-| `CLEANUP_DAYS` | No | `30` | Days before auto-deleting old images |
-| `HANDBAG_CONFIDENCE_THRESHOLD` | No | `0.5` | COCO-SSD confidence for handbag detection |
-| `MAX_IMAGES_PER_MESSAGE` | No | `2` | Max images to process per message |
-| `MAX_IMAGE_SIZE_KB` | No | `5000` | Max image file size in KB |
+| `NODE_ENV` | Yes | `development` | `development` or `production` |
+| `YOUR_PHONE_NUMBER` | Yes | - | WhatsApp number (international format) |
+| `ALLOWED_GROUPS` | Yes | - | Comma-separated `Name:ID` pairs |
+| `PUBLER_API_KEY` | Yes | - | Publer API authentication key |
+| `PUBLER_WORKSPACE_ID` | Yes | - | Publer workspace identifier |
+| `TIKTOK_ACCOUNT_ID` | Yes | - | Connected TikTok account ID in Publer |
+| `REDIS_HOST` | No | `localhost` | Redis server host |
+| `REDIS_PORT` | No | `6379` | Redis server port |
+| `MAX_VIDEOS` | No | `2` | Max videos per album |
+| `MAX_IMAGES` | No | `10` | Max images per album |
+
+### Environment Behavior
+
+**Development Mode** (`NODE_ENV=development`):
+- Only processes messages containing `/bottest`
+- Safe for testing without publishing to production TikTok
+- Clear console logs with `[DEV MODE]` prefix
+
+**Production Mode** (`NODE_ENV=production`):
+- Processes all messages EXCEPT those with `/bottest`
+- Automatically publishes to TikTok
+- Filters out test messages
 
 ---
 
@@ -289,10 +331,16 @@ Railway dashboard → Usage tab
 - Network: Moderate (downloading/uploading images)
 - Storage: Minimal (session data only, images in Supabase)
 
-**Supabase Pricing:**
-- Free tier: 500MB database, 1GB storage
-- Estimated: Free tier sufficient for testing
-- Paid: $25/month if exceeding free limits
+**Publer Pricing:**
+- Free tier: Limited posts per month
+- Professional: $10-21/month (recommended)
+- Business: $42+/month for multiple accounts
+- Check: https://publer.com/pricing
+
+**Redis (Railway Add-on):**
+- Free tier: Included in Railway usage
+- Minimal memory usage for BullMQ queue
+- Estimated: ~10MB storage for job data
 
 ---
 
@@ -301,10 +349,12 @@ Railway dashboard → Usage tab
 After successful deployment:
 
 1. ✅ Monitor logs for 24 hours to ensure stability
-2. ✅ Test with real supplier images
-3. ✅ Set up automated cleanup tasks (Phase 4, Day 11)
-4. ✅ Configure monitoring/alerts (Phase 4, Day 11)
-5. ✅ Complete documentation (Phase 4, Day 13)
+2. ✅ Test with real supplier media (videos & images)
+3. ✅ Verify TikTok posts are publishing correctly
+4. ✅ Check supplier code hashtags are generating properly
+5. ✅ Monitor Publer API rate limits and usage
+6. ✅ Set up content template rotation
+7. ✅ Configure monitoring/alerts for failed posts
 
 ---
 
@@ -317,6 +367,7 @@ After successful deployment:
 
 ---
 
-**Last Updated:** 2026-02-09
-**Railway Configuration:** Nixpacks + Node.js 18+
-**Status:** Production Ready ✅
+**Last Updated:** 2026-02-15
+**Railway Configuration:** Nixpacks + Node.js 18+ + Redis
+**Status:** TikTok Auto-Publisher Production Ready ✅
+**Features:** WhatsApp → BullMQ → Publer → TikTok
