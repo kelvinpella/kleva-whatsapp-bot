@@ -114,13 +114,14 @@ async function waitForMediaUpload(jobId, maxWaitMs = 60000) {
  * @param {Object} params.details - TikTok-specific settings
  * @returns {Promise<Object>} Publer API response with job_id
  */
-async function createTikTokVideoPost({ text, mediaIds, details = {} }) {
+async function createTikTokVideoPost({ text, mediaIds, details }) {
   try {
     const response = await axios.post(
       `${PUBLER_API_BASE}/posts/schedule/publish`,
       {
         bulk: {
           state: 'scheduled',
+          url: "publish",
           posts: [
             {
               accounts: [
@@ -133,12 +134,11 @@ async function createTikTokVideoPost({ text, mediaIds, details = {} }) {
                   type: 'video',
                   text: text,
                   media: mediaIds.map(id => ({
-                    id: id,
-                    type: 'video',
+                    id,
+                    thumbnails: [],
                   })),
                   details: {
-                    privacy: 'PUBLIC_TO_EVERYONE',
-                    comment: true,
+                    duet: true,
                     ...details,
                   },
                 },
@@ -175,13 +175,14 @@ async function createTikTokVideoPost({ text, mediaIds, details = {} }) {
  * @param {Object} params.details - TikTok-specific settings
  * @returns {Promise<Object>} Publer API response with job_id
  */
-async function createTikTokCarouselPost({ title, text, mediaIds, autoMusic = true, details = {} }) {
+async function createTikTokCarouselPost({ title, text, mediaIds, details }) {
   try {
     const response = await axios.post(
       `${PUBLER_API_BASE}/posts/schedule/publish`,
       {
         bulk: {
           state: 'scheduled',
+          url: "publish",
           posts: [
             {
               accounts: [
@@ -192,16 +193,14 @@ async function createTikTokCarouselPost({ title, text, mediaIds, autoMusic = tru
               networks: {
                 tiktok: {
                   type: 'photo',
-                  title: title,
-                  text: text,
+                  title,
+                  text,
                   media: mediaIds.map(id => ({
                     id: id,
-                    type: 'image',
+                    caption: "Picha za pochi kali kutoka Kleva Pochi Kali Kariakoo!"
                   })),
                   details: {
-                    auto_add_music: autoMusic,
-                    privacy: 'PUBLIC_TO_EVERYONE',
-                    comment: true,
+                    "auto_add_music": true,
                     ...details,
                   },
                 },

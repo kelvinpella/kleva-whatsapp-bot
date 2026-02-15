@@ -3,10 +3,18 @@
  * Handles publishing media to TikTok via Publer API
  */
 
-const { uploadMediaFromUrl, waitForMediaUpload, createTikTokVideoPost, createTikTokCarouselPost } = require('./publerClient');
+const { createTikTokVideoPost, createTikTokCarouselPost } = require('./publerClient');
 const contentTemplates = require('../config/contentTemplates.json');
 
-const POST_DELAY_MS = 60000; // 1 minute delay between posts
+const POST_DELAY_MS = 90000; // 1.5 minute delay between posts
+const DEFAULT_TIKTOK_DETAILS = {
+  "privacy": "PUBLIC_TO_EVERYONE",
+  "comment": true,
+  "stitch": true,
+  "promotional": false,
+  "paid": false,
+  "reminder": false
+}
 
 /**
  * Wait for specified milliseconds
@@ -26,8 +34,8 @@ function getRandomTemplate() {
   if (templates.length === 0) {
     console.warn('⚠️ No content templates found, using default text');
     return {
-      title: 'Pochi Kali',
-      description: 'Check out these amazing handbags! #fashion #pochiZaWadadaTrending'
+      title: 'Pochi Kali na za kisasa',
+      description: 'Pochi kali kutoka Kleva Pochi Kali Kariakoo! #fashion #pochiZaWadadaTrending'
     };
   }
 
@@ -35,11 +43,82 @@ function getRandomTemplate() {
 }
 
 /**
+ * Limit hashtags in text to maximum of 4
+ * @param {string} text - Text containing hashtags
+ * @returns {string} Text with at most 4 hashtags
+ */
+function limitHashtags(text) {
+  // Extract all hashtags
+  const hashtagRegex = /#[\w]+/g;
+  const hashtags = text.match(hashtagRegex) || [];
+
+  if (hashtags.length <= 4) {
+    return text;
+  }
+
+  // Remove hashtags beyond the 4th one
+  const hashtagsToRemove = hashtags.slice(4);
+
+  let modifiedText = text;
+  hashtagsToRemove.forEach(tag => {
+    modifiedText = modifiedText.replace(tag, '');
+  });
+
+  // Clean up extra spaces
+  modifiedText = modifiedText.replace(/\s+/g, ' ').trim();
+
+  return modifiedText;
+}
+
+/**
+ * Generate supplier code hashtag
+ * @param {string} groupName - Supplier group name
+ * @param {number} timestamp - Message timestamp in milliseconds
+ * @returns {string} Supplier code hashtag (e.g., #KLEHK0201)
+ */
+function generateSupplierCode(groupName, timestamp) {
+  // Remove spaces and special characters, keep only alphanumeric
+  const cleanName = groupName.replace(/[^a-zA-Z0-9]/g, '');
+
+  // Get first 3 characters of cleaned group name
+  const groupPrefix = cleanName.substring(0, 3).toUpperCase();
+
+  // Get date in DDMM format
+  const date = new Date(timestamp);
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const dateStr = `${day}${month}`;
+
+  // Combine: first3chars + HK + DDMM
+  return `#${groupPrefix}HK${dateStr}`;
+}
+
+/**
+ * Process description with hashtag rules
+ * @param {string} description - Original description
+ * @param {string} groupName - Supplier group name
+ * @param {number} timestamp - Message timestamp
+ * @returns {string} Processed description
+ */
+function processDescription(description, groupName, timestamp) {
+  // Step 1: Limit to 4 hashtags
+  let processed = limitHashtags(description);
+
+  // Step 2: Generate and append supplier code
+  const supplierCode = generateSupplierCode(groupName, timestamp);
+  processed = `${processed} ${supplierCode}`;
+
+  return processed;
+}
+
+/**
  * Publish videos to TikTok (one post per video)
- * @param {Array<Object>} videos - Array of video objects with url property
+ * @param {Array<Object>} videos - Array of video objects with publerId property
+ * @param {string} groupName - Supplier group name
+ * @param {number} timestamp - Message timestamp
  * @returns {Promise<Array>} Array of published post results
  */
-async function publishVideos(videos) {
+async function publishVideos(videos, groupName, timestamp) {
   if (!videos || videos.length === 0) {
     console.log('ℹ️ No videos to publish');
     return [];
@@ -54,43 +133,40 @@ async function publishVideos(videos) {
     try {
       console.log(`\n📤 Publishing video ${i + 1}/${videos.length}...`);
 
-      // Step 1: Upload video to Publer
-      console.log(`⬆️ Uploading video to Publer...`);
-      const uploadJobId = await uploadMediaFromUrl([{
-        url: video.url,
-        name: `pochi_kali_video_${i}`,
-      }]);
+      // Check if video has Publer media ID
+      if (!video.publerId) {
+        throw new Error('Video missing Publer media ID');
+      }
 
-      // Step 2: Wait for upload to complete
-      console.log(`⏳ Waiting for video upload to complete...`);
-      const uploadedMedia = await waitForMediaUpload(uploadJobId);
-      const mediaId = uploadedMedia[0].id;
-      console.log(`✅ Video uploaded with ID: ${mediaId}`);
+      console.log(`✅ Using Publer media ID: ${video.publerId}`);
 
-      // Step 3: Get random description for video
+      // Get random description for video and process it
       const template = getRandomTemplate();
-      console.log(`📝 Description: ${template.description.substring(0, 50)}...`);
+      const processedDescription = processDescription(template.description, groupName, timestamp);
+      console.log(`📝 Original: ${template.description.substring(0, 50)}...`);
+      console.log(`📝 Processed: ${processedDescription.substring(0, 50)}...`);
 
-      // Step 4: Create TikTok video post
+      // Create TikTok video post using existing Publer media ID
       console.log(`📱 Creating TikTok post...`);
       const postResult = await createTikTokVideoPost({
-        text: template.description,
-        mediaIds: [mediaId],
+        text: processedDescription,
+        mediaIds: [video.publerId],
+        details: DEFAULT_TIKTOK_DETAILS
       });
 
       results.push({
         success: true,
         videoIndex: i,
-        videoUrl: video.url,
+        publerId: video.publerId,
         postJobId: postResult.job_id,
-        template: template.description
+        template: processedDescription
       });
 
       console.log(`✅ Video ${i + 1}/${videos.length} published successfully (Job: ${postResult.job_id})`);
 
-      // Wait 1 minute before next post (except for the last one)
+      // Wait 1.5 minutes before next post (except for the last one)
       if (i < videos.length - 1) {
-        console.log(`⏳ Waiting 1 minute before next post...`);
+        console.log(`⏳ Waiting 1.5 minutes before next post...`);
         await delay(POST_DELAY_MS);
       }
 
@@ -99,7 +175,7 @@ async function publishVideos(videos) {
       results.push({
         success: false,
         videoIndex: i,
-        videoUrl: video.url,
+        publerId: video.publerId,
         error: error.message
       });
     }
@@ -110,10 +186,12 @@ async function publishVideos(videos) {
 
 /**
  * Publish images to TikTok as carousel (all images in one post)
- * @param {Array<Object>} images - Array of image objects with url property
+ * @param {Array<Object>} images - Array of image objects with publerId property
+ * @param {string} groupName - Supplier group name
+ * @param {number} timestamp - Message timestamp
  * @returns {Promise<Object>} Published carousel post result
  */
-async function publishCarousel(images) {
+async function publishCarousel(images, groupName, timestamp) {
   if (!images || images.length === 0) {
     console.log('ℹ️ No images to publish');
     return null;
@@ -122,33 +200,29 @@ async function publishCarousel(images) {
   console.log(`\n🖼️ Publishing ${images.length} image(s) as carousel to TikTok...`);
 
   try {
-    // Step 1: Upload all images to Publer
-    console.log(`⬆️ Uploading ${images.length} images to Publer...`);
-    const uploadJobId = await uploadMediaFromUrl(
-      images.map((img, index) => ({
-        url: img.url,
-        name: `pochi_kali_image_${index}`,
-      }))
-    );
+    // Extract Publer media IDs from images
+    const mediaIds = images.map(img => img.publerId).filter(id => id);
 
-    // Step 2: Wait for upload to complete
-    console.log(`⏳ Waiting for image uploads to complete...`);
-    const uploadedMedia = await waitForMediaUpload(uploadJobId);
-    const mediaIds = uploadedMedia.map(m => m.id);
-    console.log(`✅ ${mediaIds.length} images uploaded successfully`);
+    if (mediaIds.length === 0) {
+      throw new Error('No valid Publer media IDs found in images');
+    }
 
-    // Step 3: Get random title and description for carousel
+    console.log(`✅ Using ${mediaIds.length} Publer media IDs for carousel`);
+
+    // Get random title and description for carousel and process description
     const template = getRandomTemplate();
+    const processedDescription = processDescription(template.description, groupName, timestamp);
     console.log(`📝 Title: ${template.title}`);
-    console.log(`📝 Description: ${template.description.substring(0, 50)}...`);
+    console.log(`📝 Original: ${template.description.substring(0, 50)}...`);
+    console.log(`📝 Processed: ${processedDescription.substring(0, 50)}...`);
 
-    // Step 4: Create TikTok carousel post
+    // Create TikTok carousel post using existing Publer media IDs
     console.log(`📱 Creating TikTok carousel post...`);
     const postResult = await createTikTokCarouselPost({
       title: template.title,
-      text: template.description,
+      text: processedDescription,
       mediaIds: mediaIds,
-      autoMusic: true,
+      details: DEFAULT_TIKTOK_DETAILS
     });
 
     console.log(`✅ Carousel published successfully (Job: ${postResult.job_id})`);
@@ -156,11 +230,11 @@ async function publishCarousel(images) {
     return {
       success: true,
       imageCount: images.length,
-      imageUrls: images.map(img => img.url),
+      mediaIds: mediaIds,
       postJobId: postResult.job_id,
       template: {
         title: template.title,
-        description: template.description
+        description: processedDescription
       }
     };
 
@@ -177,16 +251,19 @@ async function publishCarousel(images) {
 /**
  * Publish all media (videos and images) to TikTok
  * Videos are published individually, images as carousel
- * 1-minute delay between each post
+ * 1.5-minute delay between each post
  *
  * @param {Object} params - Publishing parameters
- * @param {Array<Object>} params.videos - Array of video objects with url
- * @param {Array<Object>} params.images - Array of image objects with url
+ * @param {Array<Object>} params.videos - Array of video objects with publerId
+ * @param {Array<Object>} params.images - Array of image objects with publerId
+ * @param {string} params.groupName - Supplier group name
+ * @param {number} params.timestamp - Message timestamp
  * @returns {Promise<Object>} Publishing results
  */
-async function publishToTikTok({ videos, images }) {
+async function publishToTikTok({ videos, images, groupName, timestamp }) {
   console.log('\n🚀 Starting TikTok publishing process via Publer API...');
   console.log(`📊 Media to publish: ${videos.length} video(s), ${images.length} image(s)`);
+  console.log(`📦 Group: ${groupName}`);
 
   const results = {
     videos: [],
@@ -199,21 +276,21 @@ async function publishToTikTok({ videos, images }) {
   try {
     // Publish videos first (one post per video)
     if (videos.length > 0) {
-      results.videos = await publishVideos(videos);
+      results.videos = await publishVideos(videos, groupName, timestamp);
       results.totalPosts += videos.length;
       results.successPosts += results.videos.filter(r => r.success).length;
       results.failedPosts += results.videos.filter(r => !r.success).length;
 
       // Wait before publishing carousel if we have both videos and images
       if (images.length > 0) {
-        console.log(`\n⏳ Waiting 1 minute before publishing carousel...`);
+        console.log(`\n⏳ Waiting 1.5 minutes before publishing carousel...`);
         await delay(POST_DELAY_MS);
       }
     }
 
     // Publish images as carousel (one post with all images)
     if (images.length > 0) {
-      results.carousel = await publishCarousel(images);
+      results.carousel = await publishCarousel(images, groupName, timestamp);
       results.totalPosts += 1;
       if (results.carousel.success) {
         results.successPosts += 1;

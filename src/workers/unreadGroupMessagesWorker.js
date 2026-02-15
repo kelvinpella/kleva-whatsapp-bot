@@ -11,6 +11,7 @@
 const { Worker } = require('bullmq');
 const Redis = require('ioredis');
 const { uploadMediaToPubler } = require('./mediaUploader');
+const { publishToTikTok } = require('../services/tiktokPublisher');
 
 const MAX_VIDEOS = 2;
 const MAX_IMAGES = 10;
@@ -89,6 +90,18 @@ function initializeWorker(client, db) {
           timestamp
         });
 
+        console.log(`📹 Video Publer IDs:`, uploadedVideos.map(v => v.publerId).filter(id => id));
+        console.log(`📸 Image Publer IDs:`, uploadedImages.map(i => i.publerId).filter(id => id));
+
+        // Publish to TikTok using Publer media IDs
+        console.log(`\n🚀 Publishing to TikTok...`);
+        const publishingResults = await publishToTikTok({
+          videos: uploadedVideos,
+          images: uploadedImages,
+          groupName: groupName,
+          timestamp: timestamp
+        });
+
         const finalResult = {
           success: true,
           messageIds: messageIds,
@@ -103,12 +116,12 @@ function initializeWorker(client, db) {
           totalMedia: uploadedVideos.length + uploadedImages.length,
           droppedVideos: Math.max(0, allVideos.length - MAX_VIDEOS),
           droppedImages: Math.max(0, allImages.length - MAX_IMAGES),
+          publishing: publishingResults
         };
 
         console.log(`✅ Job completed: ${job.name}`);
         console.log(`📊 Final result: ${finalResult.videos.length} videos, ${finalResult.images.length} images (from ${messageIds.length} message(s))`);
-        console.log(`📹 Video Publer IDs:`, uploadedVideos.map(v => v.publerId).filter(id => id));
-        console.log(`📸 Image Publer IDs:`, uploadedImages.map(i => i.publerId).filter(id => id));
+        console.log(`📊 Publishing: ${publishingResults.successPosts}/${publishingResults.totalPosts} posts published successfully`);
         console.log(`✅ Job ${job.id} marked as done`);
 
         return finalResult;
