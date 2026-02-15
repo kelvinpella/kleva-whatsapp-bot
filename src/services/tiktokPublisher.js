@@ -73,7 +73,7 @@ function limitHashtags(text) {
 /**
  * Generate supplier code hashtag
  * @param {string} groupName - Supplier group name
- * @param {number} timestamp - Message timestamp in milliseconds
+ * @param {number} timestamp - Message timestamp (WhatsApp timestamp in seconds)
  * @returns {string} Supplier code hashtag (e.g., #KLEHK0201)
  */
 function generateSupplierCode(groupName, timestamp) {
@@ -83,8 +83,8 @@ function generateSupplierCode(groupName, timestamp) {
   // Get first 3 characters of cleaned group name
   const groupPrefix = cleanName.substring(0, 3).toUpperCase();
 
-  // Get date in DDMM format
-  const date = new Date(timestamp);
+  // Convert WhatsApp timestamp (seconds) to milliseconds for Date constructor
+  const date = new Date(timestamp * 1000);
   const day = String(date.getDate()).padStart(2, '0');
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const dateStr = `${day}${month}`;

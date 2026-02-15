@@ -5,7 +5,6 @@
 
 const axios = require('axios');
 const FormData = require('form-data');
-const { processVideos } = require('./videoProcessor');
 
 const PUBLER_API_BASE = 'https://app.publer.com/api/v1';
 const PUBLER_API_KEY = process.env.PUBLER_API_KEY;
@@ -62,13 +61,10 @@ async function uploadSingleMedia(buffer, filename, mimetype) {
 async function uploadMediaToPubler({ videos, images, timestamp }) {
   console.log(`📤 Uploading ${videos.length} videos and ${images.length} images to Publer...`);
 
-  // Mute videos before uploading
-  const mutedVideos = await processVideos(videos);
-
   const uploadPromises = [];
 
-  // Upload muted videos
-  mutedVideos.forEach((video, index) => {
+  // Upload videos
+  videos.forEach((video, index) => {
     const extension = getFileExtension(video.mimetype);
     const filename = `pochi_kali_video_${timestamp}_${index}.${extension}`;
     const buffer = Buffer.from(video.data, 'base64');
@@ -127,8 +123,8 @@ async function uploadMediaToPubler({ videos, images, timestamp }) {
   const uploadedMedia = await Promise.all(uploadPromises);
 
   // Separate videos and images from uploaded media
-  const uploadedVideos = uploadedMedia.slice(0, mutedVideos.length);
-  const uploadedImages = uploadedMedia.slice(mutedVideos.length);
+  const uploadedVideos = uploadedMedia.slice(0, videos.length);
+  const uploadedImages = uploadedMedia.slice(videos.length);
 
   console.log(`✅ Uploaded to Publer: ${uploadedVideos.length} videos, ${uploadedImages.length} images`);
 
