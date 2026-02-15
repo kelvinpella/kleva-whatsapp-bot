@@ -2,7 +2,7 @@
 # Installs Chromium dependencies required by Puppeteer (used by whatsapp-web.js)
 
 [phases.setup]
-nixPkgs = ["nodejs_24", "chromium"]
+nixPkgs = ["nodejs_22", "chromium"]
 
 [phases.install]
 cmds = ["npm ci --omit=dev"]
