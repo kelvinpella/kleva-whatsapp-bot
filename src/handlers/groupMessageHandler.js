@@ -14,7 +14,8 @@ const { addMessageToBatch } = require('../utils/albumBatcher');
 const { shouldProcessMessage } = require('../utils/messageFilter');
 
 // Initialize Redis connection
-const redisConnection = new Redis({
+// Uses REDIS_URL env var if available (Railway), otherwise defaults to localhost
+const redisConnection = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
   maxRetriesPerRequest: null,
 });
 

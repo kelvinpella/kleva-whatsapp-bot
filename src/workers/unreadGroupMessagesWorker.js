@@ -23,7 +23,8 @@ const MAX_IMAGES = 10;
  * @returns {Worker} - BullMQ Worker instance
  */
 function initializeWorker(client, db) {
-  const redisConnection = new Redis({
+  // Uses REDIS_URL env var if available (Railway), otherwise defaults to localhost
+  const redisConnection = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
     maxRetriesPerRequest: null,
   });
 
