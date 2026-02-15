@@ -8,9 +8,9 @@
  * 3. Reply "handbag unavailable from suppliers" if no matches
  */
 
-const { calculateEmbedding } = require('../utils/imageProcessor');
+const { calculateEmbedding } = require('../services/imageProcessor');
 const { MessageMedia } = require('whatsapp-web.js');
-const config = require('../config');
+const config = require('../../../config');
 const crypto = require('crypto');
 
 /**
