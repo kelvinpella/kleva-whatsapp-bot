@@ -48,7 +48,8 @@ async function initializeClient() {
     puppeteer: {
       headless: true,
       args: puppeteerArgs,
-      timeout: 60000
+      timeout: 60000,
+      protocolTimeout: 120000 // Increase protocol timeout to 2 minutes for Railway
     },
     userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
   });
