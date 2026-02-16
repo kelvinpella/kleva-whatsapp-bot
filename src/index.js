@@ -114,6 +114,18 @@ process.on('uncaughtException', (err) => {
 });
 
 process.on('unhandledRejection', (reason, promise) => {
+  // Ignore navigation-related errors from WhatsApp Web initialization
+  // These errors are common during page transitions and are not fatal
+  if (reason && reason.message && (
+    reason.message.includes('Execution context was destroyed') ||
+    reason.message.includes('Target closed') ||
+    reason.message.includes('Protocol error') ||
+    reason.message.includes('Navigation')
+  )) {
+    console.log('⚠️  Ignoring non-fatal initialization error:', reason.message);
+    return;
+  }
+
   console.error('Unhandled rejection at:', promise, 'reason:', reason);
   shutdown();
 });

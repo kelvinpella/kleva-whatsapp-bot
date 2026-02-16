@@ -23,11 +23,15 @@ async function initializeClient() {
   const puppeteerArgs = [
     '--no-sandbox',
     '--disable-setuid-sandbox',
-    '--disable-dev-shm-usage'
+    '--disable-dev-shm-usage',
+    '--disable-blink-features=AutomationControlled',
+    '--disable-features=IsolateOrigins,site-per-process',
+    '--disable-web-security'
   ];
 
   if (config.nodeEnv === 'production') {
     puppeteerArgs.push('--disable-gpu');
+    puppeteerArgs.push('--single-process'); // Help with Railway memory constraints
   }
 
   // Choose auth strategy based on environment
@@ -47,16 +51,27 @@ async function initializeClient() {
     authStrategy = new LocalAuth({ clientId: 'kleva-bot' });
   }
 
+  // Puppeteer configuration
+  const puppeteerConfig = {
+    headless: true,
+    args: puppeteerArgs,
+    timeout: 60000,
+    protocolTimeout: 180000 // Increase protocol timeout to 3 minutes for Railway
+  };
+
+  // Use system Chromium in Docker/production
+  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+    puppeteerConfig.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+  }
+
   // Create WhatsApp client
   client = new Client({
     authStrategy: authStrategy,
-    puppeteer: {
-      headless: true,
-      args: puppeteerArgs,
-      timeout: 60000,
-      protocolTimeout: 120000 // Increase protocol timeout to 2 minutes for Railway
-    },
-    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
+    puppeteer: puppeteerConfig,
+    qrRefreshTimeout: 60000, // Wait 60 seconds before refreshing QR
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+    // Retry configuration to handle transient errors
+    restartOnAuthFail: true
   });
 
   return client;
@@ -104,8 +119,29 @@ function setupEventHandlers(client, handlers = {}) {
     }
   });
 
+  // Loading screen event (WhatsApp Web is loading)
+  client.on('loading_screen', (percent, message) => {
+    console.log(`⏳ Loading: ${percent}% - ${message}`);
+  });
+
+  // Authentication failure event
+  client.on('auth_failure', msg => {
+    console.error('❌ Authentication failed:', msg);
+  });
+
   // Error event
   client.on('error', error => {
+    // Ignore navigation-related errors during initialization
+    // These are common during page transitions and are not fatal
+    if (error.message && (
+      error.message.includes('Execution context was destroyed') ||
+      error.message.includes('Target closed') ||
+      error.message.includes('Protocol error')
+    )) {
+      console.log('⚠️  Ignoring navigation-related error during page transition');
+      return;
+    }
+
     console.error(`❌ Client error: ${error.message}`);
 
     if (handlers.onError) {
