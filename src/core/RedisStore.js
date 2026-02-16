@@ -81,6 +81,10 @@ class RedisStore {
         throw new Error(`Session not found in Redis: ${sessionName}`);
       }
 
+      // Ensure parent directory exists
+      const dirname = require('path').dirname(path);
+      await fs.ensureDir(dirname);
+
       // Write the buffer to the filesystem
       await fs.writeFile(path, buffer);
 
