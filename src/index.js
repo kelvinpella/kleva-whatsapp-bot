@@ -30,17 +30,46 @@ async function startBot() {
     // Set up event handlers
     setupEventHandlers(client, {
       onReady: async () => {
-        // Wait 3 seconds before listing chats to avoid timeout
-        // See: https://github.com/pedroslopez/whatsapp-web.js/issues/127050
-        console.log('⏳ Waiting 3 seconds before fetching chats...');
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        console.log('✅ Client ready!');
 
-        // List all chats when ready
-        await listChats(client, db);
+        try {
+          // Wait longer for page to fully settle
+          console.log('⏳ Waiting for WhatsApp Web to fully load...');
+          await new Promise(resolve => setTimeout(resolve, 10000)); // Increase to 10 seconds
 
-        // Initialize BullMQ worker for processing queued messages
-        console.log('🔧 Initializing message queue worker...');
-        worker = initializeWorker(client, db);
+          console.log('📋 Fetching chats...');
+          await listChats(client, db);
+
+          console.log('🔧 Initializing message queue worker...');
+          worker = initializeWorker(client, db);
+
+        } catch (error) {
+          // Handle navigation/context errors gracefully
+          if (
+            error.message?.includes('Execution context was destroyed') ||
+            error.message?.includes('Target closed') ||
+            error.message?.includes('Navigation')
+          ) {
+            console.log('⚠️ Navigation error while listing chats - will retry');
+
+            // Retry after another delay
+            setTimeout(async () => {
+              try {
+                await listChats(client, db);
+                console.log('✅ Chats listed successfully on retry');
+              } catch (retryError) {
+                console.error('❌ Failed to list chats on retry:', retryError.message);
+                // Continue anyway - not critical for bot operation
+              }
+            }, 5000);
+          } else {
+            console.error('❌ Error in onReady handler:', error.message);
+          }
+
+          // Initialize worker anyway - don't block bot operation
+          console.log('🔧 Initializing message queue worker...');
+          worker = initializeWorker(client, db);
+        }
       },
       onMessage: async (msg) => {
         // Route messages based on type (group vs private)
