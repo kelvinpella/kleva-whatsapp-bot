@@ -179,11 +179,40 @@ async function startClient(client) {
 }
 
 /**
- * List all chats (groups and private)
+ * Wait for client to be fully ready and page to stabilize
+ * @param {Client} client - WhatsApp client instance
+ * @param {number} maxAttempts - Maximum number of attempts
+ * @returns {Promise<boolean>} True if client is ready
+ */
+async function waitForClientReady(client, maxAttempts = 10) {
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      const state = await client.getState();
+      if (state === 'CONNECTED') {
+        console.log('✓ Client state verified: CONNECTED');
+        return true;
+      }
+      console.log(`⏳ Client state: ${state}, waiting...`);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    } catch (err) {
+      if (i === maxAttempts - 1) {
+        console.log('⚠️  Could not verify client state, proceeding anyway...');
+        return false;
+      }
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+  }
+  return false;
+}
+
+/**
+ * List all chats (groups and private) with retry logic
  * @param {Client} client - WhatsApp client instance
  * @param {Object} db - Database handler instance
+ * @param {number} retries - Number of retries remaining
+ * @param {number} delayMs - Delay between retries in milliseconds
  */
-async function listChats(client, db) {
+async function listChats(client, db, retries = 3, delayMs = 5000) {
   try {
     const chats = await client.getChats();
     const groups = chats.filter(chat => chat.isGroup);
@@ -205,7 +234,15 @@ async function listChats(client, db) {
 
     console.log('\n💡 Configure SUPPLIER_GROUP_IDS in .env with the group IDs above\n');
   } catch (err) {
-    console.error('Error listing chats:', err);
+    // Retry on execution context errors
+    if (err.message && err.message.includes('Execution context was destroyed') && retries > 0) {
+      console.log(`⚠️  Context error when listing chats, retrying in ${delayMs / 1000}s... (${retries} retries left)`);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+      return listChats(client, db, retries - 1, delayMs);
+    }
+
+    console.error('Error listing chats:', err.message || err);
+    console.log('⚠️  Chat listing failed, but bot will continue to operate normally');
   }
 }
 
@@ -236,6 +273,7 @@ module.exports = {
   initializeClient,
   setupEventHandlers,
   startClient,
+  waitForClientReady,
   listChats,
   destroyClient,
   getClient
