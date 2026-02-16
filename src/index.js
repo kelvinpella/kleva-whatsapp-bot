@@ -5,7 +5,7 @@
 
 require('dotenv').config();
 
-const { initializeClient, setupEventHandlers, startClient, listChats, destroyClient } = require('./core/whatsapp');
+const { initializeClient, setupEventHandlers, startClient, waitForClientReady, listChats, destroyClient } = require('./core/whatsapp');
 const DatabaseHandler = require('./core/database');
 const { handleGroupMessage } = require('./handlers/groupMessageHandler');
 const { initializeWorker } = require('./workers/unreadGroupMessagesWorker');
@@ -30,12 +30,15 @@ async function startBot() {
     // Set up event handlers
     setupEventHandlers(client, {
       onReady: async () => {
-        // Wait 3 seconds before listing chats to avoid timeout
+        // Wait for page to fully stabilize before performing operations
         // See: https://github.com/pedroslopez/whatsapp-web.js/issues/127050
-        console.log('⏳ Waiting 3 seconds before fetching chats...');
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        console.log('⏳ Waiting for client to fully stabilize...');
+        await new Promise(resolve => setTimeout(resolve, 5000));
 
-        // List all chats when ready
+        // Verify client is in CONNECTED state
+        await waitForClientReady(client);
+
+        // List all chats when ready (with built-in retry logic)
         await listChats(client, db);
 
         // Initialize BullMQ worker for processing queued messages
