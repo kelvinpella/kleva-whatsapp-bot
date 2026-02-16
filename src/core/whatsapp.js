@@ -6,11 +6,14 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const config = require('../config');
+const RemoteAuth = require('./RemoteAuth');
 
 let client = null;
 
 /**
  * Initialize WhatsApp client with authentication
+ * Uses Redis-based auth for Railway (when REDIS_URL is set)
+ * Uses filesystem-based auth for local development
  * @returns {Promise<Client>} Initialized WhatsApp client
  */
 async function initializeClient() {
@@ -27,13 +30,26 @@ async function initializeClient() {
     puppeteerArgs.push('--disable-gpu');
   }
 
+  // Choose auth strategy based on environment
+  let authStrategy;
+  if (process.env.REDIS_URL) {
+    // Production (Railway): Use Redis-based session storage
+    console.log('📦 Using RemoteAuth (Redis) for session persistence');
+    authStrategy = new RemoteAuth({ clientId: 'kleva-bot' });
+  } else {
+    // Local development: Use filesystem-based session storage
+    console.log('📂 Using LocalAuth (filesystem) for session storage');
+    authStrategy = new LocalAuth({ clientId: 'kleva-bot' });
+  }
+
   // Create WhatsApp client
   client = new Client({
-    authStrategy: new LocalAuth({ clientId: 'kleva-bot' }),
+    authStrategy: authStrategy,
     puppeteer: {
       headless: true,
       args: puppeteerArgs,
-      timeout: 60000
+      timeout: 60000,
+      protocolTimeout: 120000 // Increase protocol timeout to 2 minutes for Railway
     },
     userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
   });
