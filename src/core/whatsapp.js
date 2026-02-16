@@ -3,10 +3,10 @@
  * Handles WhatsApp Web client initialization and event management
  */
 
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { Client, LocalAuth, RemoteAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const config = require('../config');
-const RemoteAuth = require('./RemoteAuth');
+const RedisStore = require('./RedisStore');
 
 let client = null;
 
@@ -33,9 +33,14 @@ async function initializeClient() {
   // Choose auth strategy based on environment
   let authStrategy;
   if (process.env.REDIS_URL) {
-    // Production (Railway): Use Redis-based session storage
+    // Production (Railway): Use Redis-based session storage with RemoteAuth
     console.log('📦 Using RemoteAuth (Redis) for session persistence');
-    authStrategy = new RemoteAuth({ clientId: 'kleva-bot' });
+    const redisStore = new RedisStore();
+    authStrategy = new RemoteAuth({
+      clientId: 'kleva-bot',
+      store: redisStore,
+      backupSyncIntervalMs: 60000 // Sync every minute
+    });
   } else {
     // Local development: Use filesystem-based session storage
     console.log('📂 Using LocalAuth (filesystem) for session storage');
