@@ -21,7 +21,10 @@ const redisConnection = new Redis(process.env.REDIS_URL || 'redis://localhost:63
 
 // Initialize BullMQ Queue for album processing jobs
 const albumProcessingQueue = new Queue('albumProcessing', {
-  connection: redisConnection,
+  connection: redisConnection, removeOnComplete:true,
+  removeOnFail: {
+    age: 2 * 24 * 3600 // keep failed jobs for 2 days
+  }
 });
 
 /**

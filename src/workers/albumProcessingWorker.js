@@ -28,7 +28,10 @@ function initializeAlbumWorker(client, db) {
 
   // Create queue for child jobs (TikTok posting)
   const tiktokPostingQueue = new Queue('tiktokPosting', {
-    connection: redisConnection,
+    connection: redisConnection, removeOnComplete: true,
+    removeOnFail: {
+      age: 2 * 24 * 3600 // keep failed jobs for 2 days
+    }
   });
 
   const worker = new Worker(
