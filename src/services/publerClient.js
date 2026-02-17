@@ -14,97 +14,6 @@ const PUBLER_API_KEY = process.env.PUBLER_API_KEY;
 const PUBLER_WORKSPACE_ID = process.env.PUBLER_WORKSPACE_ID;
 const TIKTOK_ACCOUNT_ID = process.env.TIKTOK_ACCOUNT_ID;
 
-/**
- * Upload media from URL to Publer
- * @param {Array<Object>} mediaItems - Array of media objects with url and name
- * @returns {Promise<string>} Job ID for tracking upload status
- */
-async function uploadMediaFromUrl(mediaItems) {
-  try {
-    const response = await axios.post(
-      `${PUBLER_API_BASE}/media/from-url`,
-      {
-        media: mediaItems.map((item, index) => ({
-          url: item.url,
-          name: item.name || `media_${Date.now()}_${index}`,
-          caption: item.caption || '',
-        })),
-        type: mediaItems.length === 1 ? 'single' : 'bulk',
-      },
-      {
-        headers: {
-          'Authorization': `Bearer-API ${PUBLER_API_KEY}`,
-          'Publer-Workspace-Id': PUBLER_WORKSPACE_ID,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
-
-    console.log(`✅ Media upload job created: ${response.data.job_id}`);
-    return response.data.job_id;
-
-  } catch (error) {
-    console.error('❌ Failed to upload media:', error.response?.data || error.message);
-    throw error;
-  }
-}
-
-/**
- * Check job status and get media IDs
- * @param {string} jobId - Job ID from media upload
- * @returns {Promise<Array>} Array of media IDs
- */
-async function getJobStatus(jobId) {
-  try {
-    const response = await axios.get(
-      `${PUBLER_API_BASE}/job_status/${jobId}`,
-      {
-        headers: {
-          'Authorization': `Bearer-API ${PUBLER_API_KEY}`,
-          'Publer-Workspace-Id': PUBLER_WORKSPACE_ID,
-        },
-      }
-    );
-
-    if (response.data.status === 'completed') {
-      console.log(`✅ Job ${jobId} completed`);
-      return response.data.result; // Array of media objects with IDs
-    } else if (response.data.status === 'failed') {
-      throw new Error(`Job ${jobId} failed: ${response.data.error}`);
-    } else {
-      console.log(`⏳ Job ${jobId} status: ${response.data.status}`);
-      return null; // Still processing
-    }
-
-  } catch (error) {
-    console.error(`❌ Failed to get job status:`, error.response?.data || error.message);
-    throw error;
-  }
-}
-
-/**
- * Wait for media upload job to complete
- * @param {string} jobId - Job ID to wait for
- * @param {number} maxWaitMs - Maximum wait time in milliseconds (default: 60000)
- * @returns {Promise<Array>} Array of uploaded media objects
- */
-async function waitForMediaUpload(jobId, maxWaitMs = 60000) {
-  const startTime = Date.now();
-  const checkInterval = 2000; // Check every 2 seconds
-
-  while (Date.now() - startTime < maxWaitMs) {
-    const result = await getJobStatus(jobId);
-
-    if (result) {
-      return result; // Job completed
-    }
-
-    // Wait before next check
-    await new Promise(resolve => setTimeout(resolve, checkInterval));
-  }
-
-  throw new Error(`Media upload timed out after ${maxWaitMs}ms`);
-}
 
 /**
  * Create a TikTok video post via Publer
@@ -121,7 +30,6 @@ async function createTikTokVideoPost({ text, mediaIds, details }) {
       {
         bulk: {
           state: 'scheduled',
-          url: "publish",
           posts: [
             {
               accounts: [
@@ -134,7 +42,7 @@ async function createTikTokVideoPost({ text, mediaIds, details }) {
                   type: 'video',
                   text: text,
                   media: mediaIds.map(id => ({
-                    id,
+                    id, type: "video",
                     thumbnails: [],
                   })),
                   details: {
@@ -182,7 +90,6 @@ async function createTikTokCarouselPost({ title, text, mediaIds, details }) {
       {
         bulk: {
           state: 'scheduled',
-          url: "publish",
           posts: [
             {
               accounts: [
@@ -196,7 +103,7 @@ async function createTikTokCarouselPost({ title, text, mediaIds, details }) {
                   title,
                   text,
                   media: mediaIds.map(id => ({
-                    id: id,
+                    id: id, type: "photo",
                     caption: "Picha za pochi kali kutoka Kleva Pochi Kali Kariakoo!"
                   })),
                   details: {
@@ -309,8 +216,6 @@ async function checkConnection() {
 }
 
 module.exports = {
-  uploadMediaFromUrl,
-  waitForMediaUpload,
   createTikTokVideoPost,
   createTikTokCarouselPost,
   pollPostJobStatus,
