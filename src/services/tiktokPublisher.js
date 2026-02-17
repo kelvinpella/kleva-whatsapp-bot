@@ -248,6 +248,10 @@ async function publishCarousel(images, groupName, timestamp) {
 
     console.log(`✅ Carousel published successfully (Job: ${postResult.job_id})`);
 
+    // Wait 5 minutes after carousel post completes
+    console.log(`⏳ Waiting 5 minutes after carousel completion...`);
+    await delay(POST_DELAY_MS);
+
     return {
       success: true,
       imageCount: images.length,
@@ -313,9 +317,6 @@ async function publishToTikTok({ videos, images, groupName, timestamp }) {
         results.failedPosts += 1;
       }
 
-      // Wait 5 minutes after carousel post completes
-      console.log(`⏳ Waiting 5 minutes after carousel completion...`);
-      await delay(POST_DELAY_MS);
     }
 
     console.log('\n✅ TikTok publishing complete!');
