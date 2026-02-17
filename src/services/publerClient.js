@@ -103,7 +103,7 @@ async function createTikTokCarouselPost({ title, text, mediaIds, details }) {
                   title,
                   text,
                   media: mediaIds.map(id => ({
-                    id: id, type: "photo",
+                    id: id, type: "image",
                     caption: "Picha za pochi kali kutoka Kleva Pochi Kali Kariakoo!"
                   })),
                   details: {
