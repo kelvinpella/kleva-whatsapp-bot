@@ -6,7 +6,6 @@
 require('dotenv').config();
 
 const { initializeClient, setupEventHandlers, startClient, waitForClientReady, listChats, destroyClient } = require('./core/whatsapp');
-const DatabaseHandler = require('./core/database');
 const { handleGroupMessage } = require('./handlers/groupMessageHandler');
 const { initializeAlbumWorker } = require('./workers/albumProcessingWorker');
 const { initializeTikTokWorker } = require('./workers/tiktokPostingWorker');
@@ -23,9 +22,6 @@ async function startBot() {
   try {
     console.log('🚀 Starting Kleva WhatsApp Bot...\n');
 
-    // Initialize database
-    db = new DatabaseHandler();
-
     // Initialize WhatsApp client
     client = await initializeClient();
 
@@ -41,7 +37,7 @@ async function startBot() {
         await waitForClientReady(client);
 
         // List all chats when ready (with built-in retry logic)
-        // await listChats(client, db);
+        await listChats(client);
 
         // Initialize BullMQ workers
         console.log('🔧 Initializing workers...');
