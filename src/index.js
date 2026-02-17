@@ -8,11 +8,13 @@ require('dotenv').config();
 const { initializeClient, setupEventHandlers, startClient, waitForClientReady, listChats, destroyClient } = require('./core/whatsapp');
 const DatabaseHandler = require('./core/database');
 const { handleGroupMessage } = require('./handlers/groupMessageHandler');
-const { initializeWorker } = require('./workers/unreadGroupMessagesWorker');
+const { initializeAlbumWorker } = require('./workers/albumProcessingWorker');
+const { initializeTikTokWorker } = require('./workers/tiktokPostingWorker');
 
 let client = null;
 let db = null;
-let worker = null;
+let albumWorker = null;
+let tiktokWorker = null;
 
 /**
  * Start the bot
@@ -41,9 +43,18 @@ async function startBot() {
         // List all chats when ready (with built-in retry logic)
         await listChats(client, db);
 
-        // Initialize BullMQ worker for processing queued messages
-        console.log('🔧 Initializing message queue worker...');
-        worker = initializeWorker(client, db);
+        // Initialize BullMQ workers
+        console.log('🔧 Initializing workers...');
+
+        // Parent worker: Processes album batches and uploads media
+        console.log('  → Album processing worker (parent)');
+        albumWorker = initializeAlbumWorker(client, db);
+
+        // Child worker: Posts to TikTok with status polling and delays
+        console.log('  → TikTok posting worker (child)');
+        tiktokWorker = initializeTikTokWorker();
+
+        console.log('✅ Workers initialized');
       },
       onMessage: async (msg) => {
         // Route messages based on type (group vs private)
@@ -82,10 +93,15 @@ async function shutdown() {
   console.log('\n🛑 Shutting down gracefully...');
 
   try {
-    // Close BullMQ worker
-    if (worker) {
-      console.log('Closing worker...');
-      await worker.close();
+    // Close BullMQ workers
+    if (albumWorker) {
+      console.log('Closing album processing worker...');
+      await albumWorker.close();
+    }
+
+    if (tiktokWorker) {
+      console.log('Closing TikTok posting worker...');
+      await tiktokWorker.close();
     }
 
     // Close database connection

@@ -228,6 +228,65 @@ async function createTikTokCarouselPost({ title, text, mediaIds, details }) {
 }
 
 /**
+ * Poll TikTok post job status until completion
+ * @param {string} jobId - Job ID from TikTok post creation
+ * @param {Object} options - Polling options
+ * @param {number} options.pollInterval - Interval between polls in ms (default: 10000)
+ * @param {number} options.maxWaitMs - Maximum wait time in ms (default: 300000)
+ * @returns {Promise<Object>} Job result { success: boolean, failures: Object }
+ */
+async function pollPostJobStatus(jobId, { pollInterval = 10000, maxWaitMs = 300000 } = {}) {
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < maxWaitMs) {
+    try {
+      const response = await axios.get(
+        `${PUBLER_API_BASE}/job_status/${jobId}`,
+        {
+          headers: {
+            'Authorization': `Bearer-API ${PUBLER_API_KEY}`,
+            'Publer-Workspace-Id': PUBLER_WORKSPACE_ID,
+          },
+        }
+      );
+
+      // Check if job is complete
+      if (response.data.status === 'complete') {
+        const failures = response.data.payload?.failures || {};
+
+        // Determine success based on failures object
+        if (Object.keys(failures).length === 0 || (Array.isArray(failures) && failures.length === 0)) {
+          console.log(`✅ TikTok post job ${jobId} completed successfully`);
+          return {
+            success: true,
+            failures: {},
+            payload: response.data.payload
+          };
+        } else {
+          console.error(`❌ TikTok post job ${jobId} failed:`, failures);
+          return {
+            success: false,
+            failures,
+            payload: response.data.payload
+          };
+        }
+      }
+
+      // Job still processing, wait before next poll
+      console.log(`⏳ TikTok post job ${jobId} still processing... (${Math.round((Date.now() - startTime) / 1000)}s elapsed)`);
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+
+    } catch (error) {
+      console.error(`❌ Error polling job status for ${jobId}:`, error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  // Timeout reached
+  throw new Error(`Post job ${jobId} polling timed out after ${maxWaitMs}ms`);
+}
+
+/**
  * Check Publer API connection and account status
  * @returns {Promise<Object>} Account information
  */
@@ -254,5 +313,6 @@ module.exports = {
   waitForMediaUpload,
   createTikTokVideoPost,
   createTikTokCarouselPost,
+  pollPostJobStatus,
   checkConnection
 };
