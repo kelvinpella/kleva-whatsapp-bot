@@ -41,7 +41,7 @@ async function startBot() {
         await waitForClientReady(client);
 
         // List all chats when ready (with built-in retry logic)
-        await listChats(client, db);
+        // await listChats(client, db);
 
         // Initialize BullMQ workers
         console.log('🔧 Initializing workers...');
