@@ -7,7 +7,7 @@
  * - Publishes images as single TikTok carousel post
  * - Smart hashtag processing: limits to 4 hashtags + supplier code
  * - Supplier code format: #[3chars]HK[DDMM] (e.g., #KLEHK1502)
- * - 1.5-minute delays between posts to respect rate limits
+ * - 5-minute delay after each post completes to respect rate limits
  * - Randomized content templates for variety
  * - Uses existing Publer media IDs (no re-upload)
  *
@@ -29,7 +29,7 @@
 const { createTikTokVideoPost, createTikTokCarouselPost } = require('./publerClient');
 const contentTemplates = require('../config/contentTemplates.json');
 
-const POST_DELAY_MS = 90000; // 1.5 minute delay between posts
+const POST_DELAY_MS = 300000; // 5 minute delay after each post completes
 const DEFAULT_TIKTOK_DETAILS = {
   "privacy": "PUBLIC_TO_EVERYONE",
   "comment": true,
@@ -187,11 +187,9 @@ async function publishVideos(videos, groupName, timestamp) {
 
       console.log(`✅ Video ${i + 1}/${videos.length} published successfully (Job: ${postResult.job_id})`);
 
-      // Wait 1.5 minutes before next post (except for the last one)
-      if (i < videos.length - 1) {
-        console.log(`⏳ Waiting 1.5 minutes before next post...`);
-        await delay(POST_DELAY_MS);
-      }
+      // Wait 5 minutes after each video post completes
+      console.log(`⏳ Waiting 5 minutes after post completion...`);
+      await delay(POST_DELAY_MS);
 
     } catch (error) {
       console.error(`❌ Failed to publish video ${i + 1}:`, error.message);
@@ -274,7 +272,7 @@ async function publishCarousel(images, groupName, timestamp) {
 /**
  * Publish all media (videos and images) to TikTok
  * Videos are published individually, images as carousel
- * 1.5-minute delay between each post
+ * 5-minute delay after each post completes
  *
  * @param {Object} params - Publishing parameters
  * @param {Array<Object>} params.videos - Array of video objects with publerId
@@ -303,12 +301,6 @@ async function publishToTikTok({ videos, images, groupName, timestamp }) {
       results.totalPosts += videos.length;
       results.successPosts += results.videos.filter(r => r.success).length;
       results.failedPosts += results.videos.filter(r => !r.success).length;
-
-      // Wait before publishing carousel if we have both videos and images
-      if (images.length > 0) {
-        console.log(`\n⏳ Waiting 1.5 minutes before publishing carousel...`);
-        await delay(POST_DELAY_MS);
-      }
     }
 
     // Publish images as carousel (one post with all images)
@@ -320,6 +312,10 @@ async function publishToTikTok({ videos, images, groupName, timestamp }) {
       } else {
         results.failedPosts += 1;
       }
+
+      // Wait 5 minutes after carousel post completes
+      console.log(`⏳ Waiting 5 minutes after carousel completion...`);
+      await delay(POST_DELAY_MS);
     }
 
     console.log('\n✅ TikTok publishing complete!');
