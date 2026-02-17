@@ -103,7 +103,7 @@ function initializeTikTokWorker() {
 
           const response = await createTikTokVideoPost({
             text: processedDescription,
-            mediaIds: [media.publerId],
+            mediaId: media.publerId,
             details: DEFAULT_TIKTOK_DETAILS
           });
 
@@ -142,7 +142,7 @@ function initializeTikTokWorker() {
         if (jobStatus.success) {
           console.log(`✅ [CHILD] TikTok post completed successfully!`);
         } else {
-          console.error(`❌ [CHILD] TikTok post failed:`, jobStatus.failures);
+          console.error(`❌ [CHILD] TikTok post failed:`, jobStatus?.failures);
         }
 
         // Wait 3 minutes after post completion/failure

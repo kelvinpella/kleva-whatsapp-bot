@@ -25,7 +25,7 @@ async function uploadSingleMedia(buffer, filename, mimetype) {
       contentType: mimetype,
     });
     formData.append('direct_upload', 'false');
-    formData.append('in_library', 'true');
+    formData.append('in_library', 'false');
 
     const response = await axios.post(
       `${PUBLER_API_BASE}/media`,
