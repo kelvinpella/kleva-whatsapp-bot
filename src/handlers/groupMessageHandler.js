@@ -5,7 +5,7 @@
  * Features:
  * - Filters messages from allowed groups only
  * - Detects albums (multiple media messages within 2-second window)
- * - Queues media messages for processing via BullMQ
+ * - Queues album jobs for processing via BullMQ
  */
 
 const { Queue } = require('bullmq');
@@ -19,8 +19,8 @@ const redisConnection = new Redis(process.env.REDIS_URL || 'redis://localhost:63
   maxRetriesPerRequest: null,
 });
 
-// Initialize BullMQ queue for unread group messages
-const unreadGroupMessagesQueue = new Queue('unreadGroupMessages', {
+// Initialize BullMQ Queue for album processing jobs
+const albumProcessingQueue = new Queue('albumProcessing', {
   connection: redisConnection,
 });
 
@@ -88,15 +88,19 @@ async function handleGroupMessage(msg, db, client) {
         messageBody: msg.body || '',
       },
       async (batchData) => {
-        // Queue single job for entire album
+        // Create album processing job
+        // Parent worker will process media and create child jobs for each TikTok post
         const jobName = `processAlbum-${batchData.groupId}-${Date.now()}`;
-        await unreadGroupMessagesQueue.add(jobName, batchData, {
+
+        await albumProcessingQueue.add(jobName, batchData, {
           attempts: 3,
           backoff: {
             type: 'exponential',
             delay: 2000,
           },
         });
+
+        console.log(`✅ Created album processing job: ${jobName}`);
       }
     );
 
