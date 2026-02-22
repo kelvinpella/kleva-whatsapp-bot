@@ -7,6 +7,7 @@ yarn.lock
 .env
 .env.local
 .env.*.local
+cookies.txt
 
 # WhatsApp Session & Cache
 .wwebjs_cache/
@@ -32,6 +33,9 @@ logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Python virtual environment
+src/scripts/.venv/
 
 # Temporary files
 tmp/

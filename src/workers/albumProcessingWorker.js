@@ -4,16 +4,58 @@
  * Processes album batches from WhatsApp:
  * - Downloads all media from messages
  * - Categorizes and applies limits
- * - Uploads to Publer
+ * - Saves videos to temp disk files for tiktok-uploader
  * - Creates child jobs for TikTok posting
  */
 
 const { Worker, Queue } = require('bullmq');
 const Redis = require('ioredis');
-const { uploadMediaToPubler } = require('./mediaUploader');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 
 const MAX_VIDEOS = 2;
 const MAX_IMAGES = 10;
+
+/**
+ * Save videos to temp disk files for tiktok-uploader
+ * @param {Array} videos - Array of video objects with mimetype and base64 data
+ * @param {number} timestamp - Message timestamp
+ * @returns {Promise<Array>} Array of { filePath, mimetype } objects
+ */
+async function saveVideosToDisk(videos, timestamp) {
+  const savedVideos = [];
+
+  for (let i = 0; i < videos.length; i++) {
+    const video = videos[i];
+    const extension = getFileExtension(video.mimetype);
+    const filename = `pochi-kali-${timestamp}-${i}.${extension}`;
+    const filePath = path.join(os.tmpdir(), filename);
+
+    const buffer = Buffer.from(video.data, 'base64');
+    await fs.promises.writeFile(filePath, buffer);
+
+    console.log(`💾 Saved video to disk: ${filePath}`);
+    savedVideos.push({ filePath, mimetype: video.mimetype });
+  }
+
+  return savedVideos;
+}
+
+/**
+ * Get file extension from mimetype
+ * @param {string} mimetype
+ * @returns {string}
+ */
+function getFileExtension(mimetype) {
+  const mimetypeMap = {
+    'video/mp4': 'mp4',
+    'video/mpeg': 'mpeg',
+    'video/quicktime': 'mov',
+    'video/webm': 'webm',
+  };
+  return mimetypeMap[mimetype] || 'mp4';
+}
 
 /**
  * Initialize the parent worker for album processing
@@ -85,88 +127,87 @@ function initializeAlbumWorker(client, db) {
 
         // Apply limits
         const limitedVideos = allVideos.slice(0, MAX_VIDEOS);
-        const limitedImages = allImages.slice(0, MAX_IMAGES);
+        // const limitedImages = allImages.slice(0, MAX_IMAGES); // TODO: uncomment when carousel is implemented
 
         if (allVideos.length > MAX_VIDEOS) {
           console.log(`⚠️ Dropped ${allVideos.length - MAX_VIDEOS} videos (max ${MAX_VIDEOS})`);
         }
-        if (allImages.length > MAX_IMAGES) {
-          console.log(`⚠️ Dropped ${allImages.length - MAX_IMAGES} images (max ${MAX_IMAGES})`);
-        }
+        // if (allImages.length > MAX_IMAGES) {
+        //   console.log(`⚠️ Dropped ${allImages.length - MAX_IMAGES} images (max ${MAX_IMAGES})`);
+        // }
 
-        // Upload all media to Publer
-        console.log(`\n📤 Uploading media to Publer...`);
-        const { uploadedVideos, uploadedImages } = await uploadMediaToPubler({
-          videos: limitedVideos,
-          images: limitedImages,
-          timestamp
-        });
+        // Save videos to temp disk files for tiktok-uploader
+        console.log(`\n💾 Saving videos to disk...`);
+        const savedVideos = await saveVideosToDisk(limitedVideos, timestamp);
+        console.log(`✅ Saved ${savedVideos.length} video(s) to disk`);
 
-        console.log(`✅ Uploaded: ${uploadedVideos.length} videos, ${uploadedImages.length} images`);
-        console.log(`📹 Video Publer IDs:`, uploadedVideos.map(v => v.publerId).filter(id => id));
-        console.log(`📸 Image Publer IDs:`, uploadedImages.map(i => i.publerId).filter(id => id));
+        // TODO: Upload images to Publer for carousel posting (commented out until carousel is implemented)
+        // const { uploadMediaToPubler } = require('./mediaUploader');
+        // const { uploadedImages } = await uploadMediaToPubler({ videos: [], images: limitedImages, timestamp });
+        // console.log(`📸 Image Publer IDs:`, uploadedImages.map(i => i.publerId).filter(id => id));
 
         // Create and add child jobs for TikTok posting
         const childJobIds = [];
 
         // Create one child job per video
-        for (let i = 0; i < uploadedVideos.length; i++) {
-          const video = uploadedVideos[i];
-          if (video.publerId) {
-            const jobName = `post-video-${groupId}-${timestamp}-${i}`;
-            const childJob = await tiktokPostingQueue.add(
-              jobName,
-              {
-                type: 'video',
-                media: video,
-                groupName,
-                timestamp,
-                messageBody,
-                videoIndex: i
+        for (let i = 0; i < savedVideos.length; i++) {
+          const video = savedVideos[i];
+          const jobName = `post-video-${groupId}-${timestamp}-${i}`;
+          const childJob = await tiktokPostingQueue.add(
+            jobName,
+            {
+              type: 'video',
+              media: video,
+              groupName,
+              timestamp,
+              messageBody,
+              videoIndex: i
+            },
+            {
+              attempts: 2,
+              backoff: {
+                type: 'exponential',
+                delay: 5000,
               },
-              {
-                attempts: 2,
-                backoff: {
-                  type: 'exponential',
-                  delay: 5000,
-                },
-              }
-            );
-            childJobIds.push(childJob.id);
-            console.log(`✅ Created video post job: ${jobName}`);
-          }
+            }
+          );
+          childJobIds.push(childJob.id);
+          console.log(`✅ Created video post job: ${jobName}`);
         }
 
-        // Create one child job for carousel (if images exist)
-        if (uploadedImages.length > 0) {
-          const validImages = uploadedImages.filter(img => img.publerId);
-          if (validImages.length > 0) {
-            const jobName = `post-carousel-${groupId}-${timestamp}`;
-            const childJob = await tiktokPostingQueue.add(
-              jobName,
-              {
-                type: 'carousel',
-                media: validImages,
-                groupName,
-                timestamp,
-                messageBody
-              },
-              {
-                attempts: 2,
-                backoff: {
-                  type: 'exponential',
-                  delay: 5000,
-                },
-              }
-            );
-            childJobIds.push(childJob.id);
-            console.log(`✅ Created carousel post job: ${jobName}`);
-          }
+        if (allImages.length > 0) {
+          console.log(`⏭️ [PARENT] ${allImages.length} image(s) detected but carousel posting is not yet implemented — skipping`);
         }
+
+        // TODO: Create carousel child job once tiktok-uploader supports multi-image posts
+        // if (uploadedImages.length > 0) {
+        //   const validImages = uploadedImages.filter(img => img.publerId);
+        //   if (validImages.length > 0) {
+        //     const jobName = `post-carousel-${groupId}-${timestamp}`;
+        //     const childJob = await tiktokPostingQueue.add(
+        //       jobName,
+        //       {
+        //         type: 'carousel',
+        //         media: validImages,
+        //         groupName,
+        //         timestamp,
+        //         messageBody
+        //       },
+        //       {
+        //         attempts: 2,
+        //         backoff: {
+        //           type: 'exponential',
+        //           delay: 5000,
+        //         },
+        //       }
+        //     );
+        //     childJobIds.push(childJob.id);
+        //     console.log(`✅ Created carousel post job: ${jobName}`);
+        //   }
+        // }
 
         console.log(`\n✅ [PARENT] Created ${childJobIds.length} child job(s) for TikTok posting`);
-        console.log(`   - ${uploadedVideos.filter(v => v.publerId).length} video post(s)`);
-        console.log(`   - ${uploadedImages.filter(i => i.publerId).length > 0 ? 1 : 0} carousel post`);
+        console.log(`   - ${savedVideos.length} video post(s)`);
 
         return {
           childJobIds,
@@ -174,8 +215,8 @@ function initializeAlbumWorker(client, db) {
             messageIds,
             groupId,
             groupName,
-            totalVideos: uploadedVideos.length,
-            totalImages: uploadedImages.length,
+            totalVideos: savedVideos.length,
+            totalImages: allImages.length,
             droppedVideos: Math.max(0, allVideos.length - MAX_VIDEOS),
             droppedImages: Math.max(0, allImages.length - MAX_IMAGES),
             childJobsCreated: childJobIds.length
@@ -194,8 +235,8 @@ function initializeAlbumWorker(client, db) {
   );
 
   // Event handlers
-  worker.on('completed', (job, result) => {
-    console.log(`✅ [PARENT] Job ${job.id} completed - created ${result.childJobIds.length} child jobs`);
+  worker.on('completed', (_job, result) => {
+    console.log(`✅ [PARENT] Album processed — ${result.childJobIds.length} posting job(s) queued (posting has not started yet)`);
   });
 
   worker.on('failed', (job, err) => {
