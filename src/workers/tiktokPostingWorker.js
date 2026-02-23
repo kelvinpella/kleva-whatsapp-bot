@@ -2,7 +2,7 @@
  * Child Worker - TikTok Posting
  *
  * Handles individual TikTok post jobs:
- * - Posts videos to TikTok via tiktok-uploader Python package
+ * - Posts videos and carousel slideshows to TikTok via tiktok-uploader
  * - Sends WhatsApp notification after successful post
  * - Waits 3 minutes after completion
  * - Cleans up temp video files after each attempt
@@ -163,7 +163,7 @@ async function sendNotification(message) {
     await whatsappClient.sendMessage(NOTIFICATION_NUMBER, message);
     console.log(`📲 [CHILD] Notification sent to ${NOTIFICATION_NUMBER}`);
   } catch (err) {
-    console.error('⚠️ [CHILD] Failed to send WhatsApp notification:', err.message);
+    console.error('⚠️ [CHILD] Failed to send WhatsApp notification:', err?.message || err);
   }
 }
 
@@ -213,13 +213,23 @@ function initializeTikTokWorker() {
           };
 
         } else if (type === 'carousel') {
-          // Carousel posting is not yet supported with tiktok-uploader
-          // TODO: implement when tiktok-uploader adds multi-image support
-          console.log(`⏭️ [CHILD] Skipping carousel job "${job.name}" — carousel posting is not yet implemented with tiktok-uploader`);
-          return {
-            success: false,
+          // Carousel images were converted to a slideshow video by albumProcessingWorker
+          console.log(`🖼️ [CHILD] Posting carousel slideshow video...`);
+          console.log(`   File: ${media.filePath}`);
+          console.log(`   Description: ${processedDescription.substring(0, 60)}...`);
+
+          await uploadVideoToTikTok(media.filePath, processedDescription);
+          console.log(`✅ [CHILD] Carousel slideshow uploaded to TikTok successfully!`);
+
+          await sendNotification(
+            `✅ TikTok carousel slideshow published!\n\nCaption: ${processedDescription.substring(0, 120)}...`
+          );
+
+          postResult = {
+            success: true,
             type,
-            skipped: true,
+            processedDescription,
+            filePath: media.filePath,
           };
 
         } else {

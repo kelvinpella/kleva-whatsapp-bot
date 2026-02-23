@@ -5,6 +5,7 @@
  * - Downloads all media from messages
  * - Categorizes and applies limits
  * - Saves videos to temp disk files for tiktok-uploader
+ * - Converts image albums to a slideshow video via FFmpeg
  * - Creates child jobs for TikTok posting
  */
 
@@ -13,6 +14,7 @@ const Redis = require('ioredis');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { createSlideshowVideo } = require('../utils/createSlideshowVideo');
 
 const MAX_VIDEOS = 2;
 const MAX_IMAGES = 10;
@@ -127,24 +129,19 @@ function initializeAlbumWorker(client, db) {
 
         // Apply limits
         const limitedVideos = allVideos.slice(0, MAX_VIDEOS);
-        // const limitedImages = allImages.slice(0, MAX_IMAGES); // TODO: uncomment when carousel is implemented
+        const limitedImages = allImages.slice(0, MAX_IMAGES);
 
         if (allVideos.length > MAX_VIDEOS) {
           console.log(`⚠️ Dropped ${allVideos.length - MAX_VIDEOS} videos (max ${MAX_VIDEOS})`);
         }
-        // if (allImages.length > MAX_IMAGES) {
-        //   console.log(`⚠️ Dropped ${allImages.length - MAX_IMAGES} images (max ${MAX_IMAGES})`);
-        // }
+        if (allImages.length > MAX_IMAGES) {
+          console.log(`⚠️ Dropped ${allImages.length - MAX_IMAGES} images (max ${MAX_IMAGES})`);
+        }
 
         // Save videos to temp disk files for tiktok-uploader
         console.log(`\n💾 Saving videos to disk...`);
         const savedVideos = await saveVideosToDisk(limitedVideos, timestamp);
         console.log(`✅ Saved ${savedVideos.length} video(s) to disk`);
-
-        // TODO: Upload images to Publer for carousel posting (commented out until carousel is implemented)
-        // const { uploadMediaToPubler } = require('./mediaUploader');
-        // const { uploadedImages } = await uploadMediaToPubler({ videos: [], images: limitedImages, timestamp });
-        // console.log(`📸 Image Publer IDs:`, uploadedImages.map(i => i.publerId).filter(id => id));
 
         // Create and add child jobs for TikTok posting
         const childJobIds = [];
@@ -175,39 +172,36 @@ function initializeAlbumWorker(client, db) {
           console.log(`✅ Created video post job: ${jobName}`);
         }
 
-        if (allImages.length > 0) {
-          console.log(`⏭️ [PARENT] ${allImages.length} image(s) detected but carousel posting is not yet implemented — skipping`);
-        }
+        // Convert image albums to a slideshow video and create a carousel child job
+        if (limitedImages.length > 0) {
+          console.log(`\n🎬 [PARENT] Converting ${limitedImages.length} image(s) to slideshow video...`);
+          const { slideshowPath } = await createSlideshowVideo(limitedImages, timestamp);
 
-        // TODO: Create carousel child job once tiktok-uploader supports multi-image posts
-        // if (uploadedImages.length > 0) {
-        //   const validImages = uploadedImages.filter(img => img.publerId);
-        //   if (validImages.length > 0) {
-        //     const jobName = `post-carousel-${groupId}-${timestamp}`;
-        //     const childJob = await tiktokPostingQueue.add(
-        //       jobName,
-        //       {
-        //         type: 'carousel',
-        //         media: validImages,
-        //         groupName,
-        //         timestamp,
-        //         messageBody
-        //       },
-        //       {
-        //         attempts: 2,
-        //         backoff: {
-        //           type: 'exponential',
-        //           delay: 5000,
-        //         },
-        //       }
-        //     );
-        //     childJobIds.push(childJob.id);
-        //     console.log(`✅ Created carousel post job: ${jobName}`);
-        //   }
-        // }
+          const jobName = `post-carousel-${groupId}-${timestamp}`;
+          const childJob = await tiktokPostingQueue.add(
+            jobName,
+            {
+              type: 'carousel',
+              media: { filePath: slideshowPath, mimetype: 'video/mp4' },
+              groupName,
+              timestamp,
+              messageBody,
+            },
+            {
+              attempts: 2,
+              backoff: {
+                type: 'exponential',
+                delay: 5000,
+              },
+            }
+          );
+          childJobIds.push(childJob.id);
+          console.log(`✅ Created carousel slideshow post job: ${jobName}`);
+        }
 
         console.log(`\n✅ [PARENT] Created ${childJobIds.length} child job(s) for TikTok posting`);
         console.log(`   - ${savedVideos.length} video post(s)`);
+        if (limitedImages.length > 0) console.log(`   - 1 carousel slideshow post`);
 
         return {
           childJobIds,
