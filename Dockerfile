@@ -1,7 +1,11 @@
-# Use Node.js LTS with Debian for better Puppeteer compatibility
-FROM node:20-slim
+FROM node:22-slim
 
-# Install Chromium and dependencies for Puppeteer
+# ---------------------------------------------------------------------------
+# System dependencies
+#   chromium          → whatsapp-web.js (Puppeteer)
+#   python3 / venv    → tiktok-uploader Python script
+#   ffmpeg            → slideshow video creation (createSlideshowVideo.js)
+# ---------------------------------------------------------------------------
 RUN apt-get update && apt-get install -y \
     chromium \
     fonts-liberation \
@@ -21,31 +25,42 @@ RUN apt-get update && apt-get install -y \
     libxdamage1 \
     libxrandr2 \
     xdg-utils \
+    python3 \
+    python3-pip \
+    python3-venv \
+    ffmpeg \
     ca-certificates \
+    wget \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Set Puppeteer to use installed Chromium
+# Puppeteer: skip bundled download, use system Chromium
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
-# Set working directory
 WORKDIR /app
 
-# Copy package files
+# ---------------------------------------------------------------------------
+# Node.js dependencies
+# ---------------------------------------------------------------------------
 COPY package*.json ./
-
-# Install dependencies
 RUN npm ci --only=production
 
-# Copy application code
+# ---------------------------------------------------------------------------
+# Application code
+# ---------------------------------------------------------------------------
 COPY . .
 
-# Set environment to production
+# ---------------------------------------------------------------------------
+# Python venv — tiktok-uploader + Playwright Chrome
+# Playwright downloads Chrome (~350 MB) into /root/.cache/ms-playwright/
+# --with-deps installs any missing system libraries automatically
+# ---------------------------------------------------------------------------
+RUN python3 -m venv src/scripts/.venv \
+    && src/scripts/.venv/bin/pip install --upgrade pip --quiet \
+    && src/scripts/.venv/bin/pip install tiktok-uploader --quiet \
+    && src/scripts/.venv/bin/playwright install --with-deps chrome
+
 ENV NODE_ENV=production
 
-# Expose port (optional, for health checks)
-EXPOSE 3000
-
-# Start the bot
 CMD ["npm", "start"]

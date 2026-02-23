@@ -3,10 +3,9 @@
  * Handles WhatsApp Web client initialization and event management
  */
 
-const { Client, LocalAuth, RemoteAuth } = require('whatsapp-web.js');
+const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const config = require('../config');
-const RedisStore = require('./RedisStore');
 
 let client = null;
 
@@ -31,32 +30,19 @@ async function initializeClient() {
 
   if (config.nodeEnv === 'production') {
     puppeteerArgs.push('--disable-gpu');
-    puppeteerArgs.push('--single-process'); // Help with Railway memory constraints
   }
 
-  // Choose auth strategy based on environment
-  let authStrategy;
-  if (process.env.REDIS_URL) {
-    // Production (Railway): Use Redis-based session storage with RemoteAuth
-    console.log('📦 Using RemoteAuth (Redis) for session persistence');
-    const redisStore = new RedisStore();
-    authStrategy = new RemoteAuth({
-      clientId: 'kleva-bot',
-      store: redisStore,
-      backupSyncIntervalMs: 60000 // Sync every minute
-    });
-  } else {
-    // Local development: Use filesystem-based session storage
-    console.log('📂 Using LocalAuth (filesystem) for session storage');
-    authStrategy = new LocalAuth({ clientId: 'kleva-bot' });
-  }
+  // Use filesystem-based session storage — VPS has a persistent filesystem,
+  // session data is kept alive via a Docker volume mounted at .wwebjs_auth/
+  console.log('📂 Using LocalAuth (filesystem) for session storage');
+  const authStrategy = new LocalAuth({ clientId: 'kleva-bot' });
 
   // Puppeteer configuration
   const puppeteerConfig = {
     headless: true,
     args: puppeteerArgs,
     timeout: 60000,
-    protocolTimeout: 180000 // Increase protocol timeout to 3 minutes for Railway
+    protocolTimeout: 180000
   };
 
   // Use system Chromium in Docker/production
@@ -88,7 +74,7 @@ function setupEventHandlers(client, handlers = {}) {
     console.log('\n📱 QR Code received — scan with WhatsApp on your phone:\n');
     qrcode.generate(qr, { small: true });
 
-    // Also output QR code URL for generating image online (useful for Railway)
+    // Output QR URL as a fallback when terminal rendering is poor
     console.log('\n🔗 Alternative: Generate QR image at:');
     console.log(`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qr)}`);
     console.log('\nOpen this URL in your browser, then scan the QR image with WhatsApp.\n');

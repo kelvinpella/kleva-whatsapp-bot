@@ -11,8 +11,12 @@ node_modules
 *.md
 README.md
 docs/
-*.txt
 .env.example
+
+# Sensitive files — never bake into the image
+# cookies.txt is mounted as a volume at runtime (see docker-compose.yml)
+cookies.txt
+.env
 
 # Test files
 test/
@@ -39,9 +43,12 @@ temp/
 *.swo
 .wh..*
 
-# Session data (generated at runtime)
+# Session data (generated at runtime, mounted as Docker volume)
 .wwebjs_auth/
 .wwebjs_cache/
+
+# Python venv (rebuilt for Linux inside Docker)
+src/scripts/.venv/
 
 # Scripts for local development only
 start-bot.sh

@@ -1,0 +1,34 @@
+services:
+
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Override Redis URL to reach the redis service inside the compose network
+      - REDIS_URL=redis://redis:6379
+      - NODE_ENV=production
+    volumes:
+      # WhatsApp session — persists across container restarts and redeployments
+      - whatsapp_session:/app/.wwebjs_auth
+      # TikTok cookies — copy cookies.txt to the server next to docker-compose.yml
+      # then run: docker compose up -d
+      - ./cookies.txt:/app/cookies.txt:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  whatsapp_session:   # WhatsApp LocalAuth session files
+  redis_data:         # BullMQ job queues
