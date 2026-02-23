@@ -4,7 +4,7 @@
  * Handles individual TikTok post jobs:
  * - Posts videos and carousel slideshows to TikTok via tiktok-uploader
  * - Sends WhatsApp notification after successful post
- * - Waits 3 minutes after completion
+ * - Waits a random 7–12 minutes after completion
  * - Cleans up temp video files after each attempt
  * - Returns result to parent flow
  */
@@ -17,7 +17,8 @@ const fs = require('fs');
 const { getClient } = require('../core/whatsapp');
 const { getRandomTemplate } = require('../services/tiktokPublisher');
 
-const POST_DELAY_MS = 180000; // 3 minutes (180,000 ms)
+const POST_DELAY_MIN_MS = 7 * 60 * 1000;  // 7 minutes
+const POST_DELAY_MAX_MS = 12 * 60 * 1000; // 12 minutes
 const NOTIFICATION_NUMBER = process.env.NOTIFICATION_NUMBER;
 const PROJECT_ROOT = path.join(__dirname, '../..');
 const TIKTOK_COOKIES_PATH = process.env.TIKTOK_COOKIES_PATH
@@ -236,10 +237,12 @@ function initializeTikTokWorker() {
           throw new Error(`Unknown post type: ${type}`);
         }
 
-        // Wait 3 minutes after post completion before next post can proceed
-        console.log(`⏳ [CHILD] Waiting 3 minutes before next post can proceed...`);
-        await delay(POST_DELAY_MS);
-        console.log(`✅ [CHILD] 3-minute delay completed`);
+        // Wait a random 7–12 minutes after each post before the next one
+        const postDelayMs = POST_DELAY_MIN_MS + Math.random() * (POST_DELAY_MAX_MS - POST_DELAY_MIN_MS);
+        const postDelayMin = (postDelayMs / 60000).toFixed(1);
+        console.log(`⏳ [CHILD] Waiting ${postDelayMin} minutes before next post can proceed...`);
+        await delay(postDelayMs);
+        console.log(`✅ [CHILD] Delay completed`);
 
         console.log(`✅ [CHILD] Job ${job.name} completed`);
         return postResult;

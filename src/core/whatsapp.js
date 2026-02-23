@@ -11,8 +11,8 @@ let client = null;
 
 /**
  * Initialize WhatsApp client with authentication
- * Uses Redis-based auth for Railway (when REDIS_URL is set)
- * Uses filesystem-based auth for local development
+ * Uses LocalAuth (filesystem) in all environments.
+ * On the VPS the .wwebjs_auth/ directory is kept alive by a Docker volume.
  * @returns {Promise<Client>} Initialized WhatsApp client
  */
 async function initializeClient() {
