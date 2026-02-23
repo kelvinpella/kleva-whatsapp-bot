@@ -20,7 +20,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const TARGET_DURATION_S = 14; // total slideshow length in seconds
+const TARGET_DURATION_S = 10; // total slideshow length in seconds
 const TARGET_WIDTH = 1080;
 const TARGET_HEIGHT = 1920;
 const TARGET_FPS = 30;

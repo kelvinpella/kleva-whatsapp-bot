@@ -95,7 +95,7 @@ def main():
 
     uploader = TikTokUploader(
         cookies=args.cookies,
-        headless=False,   
+        headless=True,   
         browser="chrome"
     )
 
