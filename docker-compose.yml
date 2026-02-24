@@ -14,6 +14,8 @@ services:
       # TikTok cookies — copy cookies.txt to the server next to docker-compose.yml
       # then run: docker compose up -d
       - ./cookies.txt:/app/cookies.txt:ro
+    # Increase shared memory for Playwright Chrome (default 64 MB is too small)
+    shm_size: '256mb'
     depends_on:
       redis:
         condition: service_healthy
