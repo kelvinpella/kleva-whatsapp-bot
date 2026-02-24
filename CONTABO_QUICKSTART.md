@@ -97,35 +97,39 @@ Save: `Ctrl+O` → `Enter` → `Ctrl+X`
 
 ---
 
-## Step 6 — Add TikTok Cookies
+## Step 6 — Generate TikTok Cookies from the VPS
 
-> **IP mismatch warning**: TikTok can invalidate a session when it detects a large
-> geographic jump (e.g. Tanzania → Germany). The cookies must be generated from an
-> IP in the **same country as your Contabo server** — Contabo's default datacenter
-> is **Nuremberg, Germany**.
+Cookies must be generated from the VPS IP so TikTok doesn't see a geographic mismatch.
+The project includes `src/scripts/gen_cookies.py` which launches a headless Chrome on the
+VPS, lets you log in via Chrome DevTools from your local machine, then saves the cookies.
 
-**Before exporting cookies**, connect your local machine to a **German VPN exit node**
-(ProtonVPN, Mullvad, etc. all have free/paid German servers), then:
+You need **three terminals** open at the same time:
 
-1. Open an **Incognito / Private** browser window
-2. Navigate to **tiktok.com** and log into the account the bot will post from
-3. Install the **"Get cookies.txt LOCALLY"** Chrome/Firefox extension
-4. Click the extension icon on tiktok.com → export → save as `cookies.txt`
-5. Disconnect the VPN
-
-Copy the file to the server:
-
+**Terminal 1 — VPS** (run after the image is built in Step 7):
 ```bash
-scp cookies.txt root@<your-server-ip>:~/kleva-whatsapp-bot/
+cd ~/kleva-whatsapp-bot
+docker compose run --rm -p 127.0.0.1:9222:9222 app \
+  src/scripts/.venv/bin/python src/scripts/gen_cookies.py > cookies.txt
+```
+The script prints instructions and waits. Leave this terminal open.
+
+**Terminal 2 — local machine** (SSH tunnel, keep open):
+```bash
+ssh -L 9222:localhost:9222 root@<your-server-ip>
 ```
 
-`cookies.txt` must sit next to `docker-compose.yml`.
+**Local Chrome:**
+1. Open `chrome://inspect`
+2. Under **"Remote Target"** click **"inspect"** next to the TikTok tab
+3. A DevTools panel opens — log into TikTok normally inside it
+4. Go back to Terminal 1 and press **Enter**
 
-**When cookies expire** (TikTok sessions typically last weeks to months):
-repeat the VPN → login → export steps above, then:
+`cookies.txt` is created on the VPS next to `docker-compose.yml`. ✓
 
+**When cookies expire** (typically every few weeks to months), repeat:
 ```bash
-scp cookies.txt root@<your-server-ip>:~/kleva-whatsapp-bot/
+docker compose run --rm -p 127.0.0.1:9222:9222 app \
+  src/scripts/.venv/bin/python src/scripts/gen_cookies.py > cookies.txt
 docker compose restart app
 ```
 
