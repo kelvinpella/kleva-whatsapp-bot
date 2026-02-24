@@ -97,15 +97,29 @@ Save: `Ctrl+O` → `Enter` → `Ctrl+X`
 
 ---
 
-## Step 6 — Generate TikTok Cookies from the VPS
+## Step 6 — Build the Docker Image
+
+```bash
+docker compose build
+```
+
+The first build downloads Playwright Chrome (~350 MB) and installs all dependencies.
+It takes 5–10 minutes. Subsequent builds are much faster.
+
+---
+
+## Step 7 — Generate TikTok Cookies from the VPS
+
+> **Do this before starting the bot.** If `cookies.txt` is missing when the bot starts,
+> Docker mounts a directory instead of a file and the TikTok uploader breaks silently.
 
 Cookies must be generated from the VPS IP so TikTok doesn't see a geographic mismatch.
-The project includes `src/scripts/gen_cookies.py` which launches a headless Chrome on the
-VPS, lets you log in via Chrome DevTools from your local machine, then saves the cookies.
+`src/scripts/gen_cookies.py` launches a headless Chrome on the VPS, lets you log in via
+Chrome DevTools from your local machine, then saves the cookies.
 
 You need **three terminals** open at the same time:
 
-**Terminal 1 — VPS** (run after the image is built in Step 7):
+**Terminal 1 — VPS:**
 ```bash
 cd ~/kleva-whatsapp-bot
 docker compose run --rm -p 127.0.0.1:9222:9222 app \
@@ -135,18 +149,15 @@ docker compose restart app
 
 ---
 
-## Step 7 — Build & Start
+## Step 8 — Start the Bot
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
-
-The first build downloads Playwright Chrome (~350 MB) and installs all dependencies.
-It takes 5–10 minutes. Subsequent builds are much faster.
 
 ---
 
-## Step 8 — Authenticate WhatsApp
+## Step 9 — Authenticate WhatsApp
 
 ```bash
 docker compose logs -f app
