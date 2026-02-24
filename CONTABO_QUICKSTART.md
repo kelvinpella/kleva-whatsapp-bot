@@ -99,16 +99,35 @@ Save: `Ctrl+O` → `Enter` → `Ctrl+X`
 
 ## Step 6 — Add TikTok Cookies
 
-On your **local machine**, export TikTok cookies in Netscape format using the
-**"Get cookies.txt LOCALLY"** Chrome/Firefox extension while logged into tiktok.com,
-then copy the file to the server:
+> **IP mismatch warning**: TikTok can invalidate a session when it detects a large
+> geographic jump (e.g. Tanzania → Germany). The cookies must be generated from an
+> IP in the **same country as your Contabo server** — Contabo's default datacenter
+> is **Nuremberg, Germany**.
+
+**Before exporting cookies**, connect your local machine to a **German VPN exit node**
+(ProtonVPN, Mullvad, etc. all have free/paid German servers), then:
+
+1. Open an **Incognito / Private** browser window
+2. Navigate to **tiktok.com** and log into the account the bot will post from
+3. Install the **"Get cookies.txt LOCALLY"** Chrome/Firefox extension
+4. Click the extension icon on tiktok.com → export → save as `cookies.txt`
+5. Disconnect the VPN
+
+Copy the file to the server:
 
 ```bash
 scp cookies.txt root@<your-server-ip>:~/kleva-whatsapp-bot/
 ```
 
 `cookies.txt` must sit next to `docker-compose.yml`.
-When cookies expire, replace the file and run `docker compose restart app`.
+
+**When cookies expire** (TikTok sessions typically last weeks to months):
+repeat the VPN → login → export steps above, then:
+
+```bash
+scp cookies.txt root@<your-server-ip>:~/kleva-whatsapp-bot/
+docker compose restart app
+```
 
 ---
 
