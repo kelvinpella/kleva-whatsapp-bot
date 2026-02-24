@@ -1,15 +1,32 @@
 # Contabo VPS — Deployment Guide
 
-## Prerequisites
+---
 
-- Contabo VPS (choose Ubuntu 22.04 when provisioning)
-- SSH access to the server
-- Docker + Docker Compose installed on the server
-- TikTok `cookies.txt` ready (export from browser using a Netscape cookie extension)
+## Step 1 — Order & Provision the VPS
+
+1. Go to **contabo.com → Cloud VPS** and order a plan (4 GB RAM minimum recommended)
+2. During checkout, under **"Operating System"** select **Ubuntu 22.04**
+3. Set a strong root password (you'll use this to SSH in)
+4. Complete the order — Contabo sends a confirmation email with your **server IP** and credentials within a few minutes
 
 ---
 
-## 1. Install Docker on the VPS
+## Step 2 — SSH Into the Server
+
+Use the IP address and root password from the confirmation email:
+
+```bash
+ssh root@<your-server-ip>
+```
+
+> **Contabo panel** (`my.contabo.com` → **Your Services → VPS**): if you need to
+> reset the root password, click the **⋮** menu next to your server → **Manage**
+> → **Reset Password**. Use the **VNC Console** button as an emergency fallback
+> if SSH is unreachable.
+
+---
+
+## Step 3 — Install Docker
 
 ```bash
 curl -fsSL https://get.docker.com | sh
@@ -17,20 +34,31 @@ sudo usermod -aG docker $USER
 newgrp docker
 ```
 
----
-
-## 2. Clone the Repo
+Verify:
 
 ```bash
-git clone https://github.com/kelvinpella/kleva-whatsapp-bot.git
+docker --version
+docker compose version
+```
+
+---
+
+## Step 4 — Clone the Repo
+
+```bash
+git clone https://github.com/your-org/kleva-whatsapp-bot.git
 cd kleva-whatsapp-bot
 ```
 
 ---
 
-## 3. Create `.env`
+## Step 5 — Create `.env`
 
-Copy the template below and fill in real values:
+```bash
+nano .env
+```
+
+Paste and fill in real values:
 
 ```env
 # App
@@ -56,7 +84,7 @@ SUPABASE_STORAGE_BUCKET=handbags
 # WhatsApp groups to monitor (GroupName:GroupID)
 ALLOWED_GROUPS=Kleva Pochi Kali:120363424482974321@g.us
 
-# TikTok — path is relative to project root, mounted as a volume
+# TikTok — path relative to project root, mounted as a volume
 TIKTOK_COOKIES_PATH=cookies.txt
 
 # WhatsApp number to notify after each TikTok post (no + prefix, with @c.us)
@@ -65,44 +93,51 @@ NOTIFICATION_NUMBER=255XXXXXXXXX@c.us
 
 > `NODE_ENV` and `REDIS_URL` are set automatically by docker-compose — do not add them.
 
+Save: `Ctrl+O` → `Enter` → `Ctrl+X`
+
 ---
 
-## 4. Add TikTok Cookies
+## Step 6 — Add TikTok Cookies
 
-Export your TikTok session cookies in **Netscape format** (use the
-"Get cookies.txt LOCALLY" Chrome/Firefox extension on tiktok.com while logged in),
+On your **local machine**, export TikTok cookies in Netscape format using the
+**"Get cookies.txt LOCALLY"** Chrome/Firefox extension while logged into tiktok.com,
 then copy the file to the server:
 
 ```bash
-scp cookies.txt user@your-server-ip:~/kleva-whatsapp-bot/
+scp cookies.txt root@<your-server-ip>:~/kleva-whatsapp-bot/
 ```
 
-The file must be named `cookies.txt` and sit next to `docker-compose.yml`.
+`cookies.txt` must sit next to `docker-compose.yml`.
 When cookies expire, replace the file and run `docker compose restart app`.
 
 ---
 
-## 5. Build & Start
+## Step 7 — Build & Start
 
 ```bash
 docker compose up -d --build
 ```
 
-First build downloads Playwright Chrome (~350 MB) and installs all deps — it takes a few minutes.
+The first build downloads Playwright Chrome (~350 MB) and installs all dependencies.
+It takes 5–10 minutes. Subsequent builds are much faster.
 
 ---
 
-## 6. Authenticate WhatsApp
+## Step 8 — Authenticate WhatsApp
 
 ```bash
 docker compose logs -f app
 ```
 
-Wait for the QR code to appear in the logs, then scan it from WhatsApp on your phone:
-**Settings → Linked Devices → Link a Device**
+Wait for the QR code to appear, then scan it from WhatsApp on your phone:
+**WhatsApp → Settings → Linked Devices → Link a Device**
 
 Once you see `✓ Client is ready and session is persisted!` the bot is live.
-The session is stored in a Docker volume and survives restarts — you only scan once.
+The session is stored in a Docker volume — you only scan once.
+
+> **If the QR is hard to read in the terminal**, the logs also print a URL like:
+> `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=...`
+> Open it in a browser to get a clean QR image to scan.
 
 ---
 
@@ -112,16 +147,16 @@ The session is stored in a Docker volume and survives restarts — you only scan
 # View live logs
 docker compose logs -f app
 
-# Restart the bot (e.g. after updating cookies.txt)
+# Restart the bot (e.g. after replacing cookies.txt)
 docker compose restart app
 
 # Pull latest code and redeploy
 git pull && docker compose up -d --build
 
-# Stop everything
+# Stop everything (keeps session + queue data)
 docker compose down
 
-# Stop and wipe all data (including WhatsApp session — forces re-scan)
+# Full reset — deletes WhatsApp session (forces new QR scan)
 docker compose down -v
 ```
 
@@ -129,14 +164,26 @@ docker compose down -v
 
 ## How Persistence Works
 
-| Data | Where it lives |
+| Data | Storage |
 |---|---|
 | WhatsApp session | `whatsapp_session` Docker volume → `/app/.wwebjs_auth/` |
 | BullMQ job queues | `redis_data` Docker volume |
 | TikTok cookies | `./cookies.txt` bind-mounted read-only into the container |
 
-`docker compose down` keeps the volumes intact.
-`docker compose down -v` deletes them (forces new QR scan on next start).
+`docker compose down` preserves all volumes.
+`docker compose down -v` wipes them (next start requires a new QR scan).
+
+---
+
+## Contabo Panel Reference
+
+| Task | Navigation |
+|---|---|
+| Find server IP | `my.contabo.com` → Your Services → VPS → server row |
+| Reset root password | ⋮ → Manage → Reset Password |
+| Emergency console (no SSH) | ⋮ → Manage → VNC Console |
+| Reinstall OS | ⋮ → Manage → Reinstall → choose Ubuntu 22.04 |
+| Reboot server | ⋮ → Restart |
 
 ---
 
@@ -146,10 +193,10 @@ docker compose down -v
 → `docker compose logs app` — look for Puppeteer/Chromium errors
 
 **Bot disconnects after scan?**
-→ Make sure the phone has internet; check Linked Devices on phone
+→ Ensure the phone has internet; check WhatsApp → Linked Devices
 
 **TikTok upload fails — "No valid authentication"?**
-→ Cookies have expired; export fresh `cookies.txt`, copy to server, then `docker compose restart app`
+→ Cookies expired; copy fresh `cookies.txt` to server, then `docker compose restart app`
 
 **Redis connection refused?**
-→ `docker compose ps` — confirm the redis service is healthy before app starts
+→ `docker compose ps` — confirm the redis service shows as healthy
