@@ -2,26 +2,30 @@
  * Child Worker - TikTok Posting
  *
  * Handles individual TikTok post jobs:
- * - Posts videos or carousels to TikTok
- * - Polls job status until completion
- * - Waits 3 minutes after confirmation
+ * - Posts videos and carousel slideshows to TikTok via tiktok-uploader
+ * - Sends WhatsApp notification after successful post
+ * - Waits a random 7–12 minutes after completion
+ * - Cleans up temp video files after each attempt
  * - Returns result to parent flow
  */
 
 const { Worker } = require('bullmq');
 const Redis = require('ioredis');
-const { createTikTokVideoPost, createTikTokCarouselPost, pollPostJobStatus } = require('../services/publerClient');
+const { spawn } = require('child_process');
+const path = require('path');
+const fs = require('fs');
+const { getClient } = require('../core/whatsapp');
 const { getRandomTemplate } = require('../services/tiktokPublisher');
 
-const POST_DELAY_MS = 180000; // 3 minutes (180,000 ms)
-const DEFAULT_TIKTOK_DETAILS = {
-  "privacy": "PUBLIC_TO_EVERYONE",
-  "comment": true,
-  "stitch": true,
-  "promotional": false,
-  "paid": false,
-  "reminder": false
-};
+const POST_DELAY_MIN_MS = 7 * 60 * 1000;  // 7 minutes
+const POST_DELAY_MAX_MS = 12 * 60 * 1000; // 12 minutes
+const NOTIFICATION_NUMBER = process.env.NOTIFICATION_NUMBER;
+const PROJECT_ROOT = path.join(__dirname, '../..');
+const TIKTOK_COOKIES_PATH = process.env.TIKTOK_COOKIES_PATH
+  ? path.resolve(PROJECT_ROOT, process.env.TIKTOK_COOKIES_PATH)
+  : null; // resolved relative to project root; absolute paths also work
+const PYTHON_BIN = path.join(__dirname, '../scripts/.venv/bin/python');
+const PYTHON_SCRIPT = path.join(__dirname, '../scripts/upload_tiktok.py');
 
 /**
  * Wait for specified milliseconds
@@ -74,6 +78,97 @@ function processDescription(description, groupName, timestamp) {
 }
 
 /**
+ * Upload a video to TikTok via the Python tiktok-uploader script.
+ * @param {string} videoPath - Absolute path to the video file
+ * @param {string} description - Post caption/description
+ * @returns {Promise<Object>} Result object { success: boolean, error?: string }
+ */
+async function uploadVideoToTikTok(videoPath, description) {
+  if (!TIKTOK_COOKIES_PATH) {
+    throw new Error('TIKTOK_COOKIES_PATH env var is not set');
+  }
+
+  return await new Promise((resolve, reject) => {
+    const args = [
+        PYTHON_SCRIPT,
+        '--video', videoPath,
+        '--description', description,
+        '--cookies', TIKTOK_COOKIES_PATH,
+      ];
+
+      console.log(`🐍 [CHILD] Spawning Python upload script...`);
+      const proc = spawn(PYTHON_BIN, args);
+
+      let stdout = '';
+
+      proc.stdout.on('data', (data) => {
+        stdout += data.toString();
+      });
+
+      proc.stderr.on('data', (data) => {
+        process.stderr.write(data); // stream Python logs to Node stderr in real time
+      });
+
+      proc.on('close', (code) => {
+        if (code === 0) {
+          try {
+            const result = JSON.parse(stdout.trim());
+            resolve(result);
+          } catch {
+            resolve({ success: true }); // treat as success if JSON parse fails but exit 0
+          }
+        } else {
+          let errorMessage = `Python script exited with code ${code}`;
+          try {
+            const result = JSON.parse(stdout.trim());
+            if (result.error) errorMessage = result.error;
+          } catch { /* ignore */ }
+          reject(new Error(errorMessage));
+        }
+      });
+
+      proc.on('error', (err) => {
+        reject(new Error(`Failed to spawn Python process: ${err.message}`));
+      });
+    });
+}
+
+/**
+ * Delete a temp file, ignoring errors
+ * @param {string} filePath
+ */
+async function deleteTempFile(filePath) {
+  try {
+    await fs.promises.unlink(filePath);
+    console.log(`🗑️ [CHILD] Deleted temp file: ${filePath}`);
+  } catch {
+    // Non-fatal — file may have already been removed
+  }
+}
+
+/**
+ * Send a WhatsApp notification to the configured number
+ * @param {string} message
+ */
+async function sendNotification(message) {
+  if (!NOTIFICATION_NUMBER) {
+    console.log('⚠️ [CHILD] NOTIFICATION_NUMBER not set, skipping notification');
+    return;
+  }
+  try {
+    const whatsappClient = getClient();
+    if (!whatsappClient) {
+      console.log('⚠️ [CHILD] WhatsApp client not ready, skipping notification');
+      return;
+    }
+    await whatsappClient.sendMessage(NOTIFICATION_NUMBER, message);
+    console.log(`📲 [CHILD] Notification sent to ${NOTIFICATION_NUMBER}`);
+  } catch (err) {
+    console.error('⚠️ [CHILD] Failed to send WhatsApp notification:', err?.message || err);
+  }
+}
+
+/**
  * Initialize the child worker for TikTok posting
  */
 function initializeTikTokWorker() {
@@ -86,9 +181,8 @@ function initializeTikTokWorker() {
     async (job) => {
       try {
         console.log(`\n🔄 [CHILD] Processing TikTok post job: ${job.name}`);
-        const { type, media, groupName, timestamp, messageBody, videoIndex } = job.data;
+        const { type, media, groupName, timestamp, videoIndex } = job.data;
 
-        let postJobId;
         let postResult;
 
         // Get template and process description
@@ -96,68 +190,59 @@ function initializeTikTokWorker() {
         const processedDescription = processDescription(template.description, groupName, timestamp);
 
         if (type === 'video') {
-          // Post single video
           console.log(`📹 [CHILD] Posting video ${videoIndex !== undefined ? videoIndex + 1 : ''}...`);
-          console.log(`   Publer ID: ${media.publerId}`);
+          console.log(`   File: ${media.filePath}`);
           console.log(`   Description: ${processedDescription.substring(0, 60)}...`);
 
-          const response = await createTikTokVideoPost({
-            text: processedDescription,
-            mediaId: media.publerId,
-            details: DEFAULT_TIKTOK_DETAILS
-          });
+          let uploadSuccess = false;
 
-          postJobId = response.job_id;
-          console.log(`✅ [CHILD] Video post created with job ID: ${postJobId}`);
+          await uploadVideoToTikTok(media.filePath, processedDescription);
+          uploadSuccess = true;
+          console.log(`✅ [CHILD] Video uploaded to TikTok successfully!`);
+
+          // Notify via WhatsApp after successful post
+          await sendNotification(
+            `✅ TikTok video published! Go check it out.\n\nCaption: ${processedDescription.substring(0, 120)}...`
+          );
+
+          postResult = {
+            success: uploadSuccess,
+            type,
+            processedDescription,
+            videoIndex,
+            filePath: media.filePath,
+          };
 
         } else if (type === 'carousel') {
-          // Post carousel with all images
-          console.log(`🖼️ [CHILD] Posting carousel with ${media.length} images...`);
-          const mediaIds = media.map(img => img.publerId).filter(id => id);
-          console.log(`   Publer IDs: ${mediaIds.join(', ')}`);
-          console.log(`   Title: ${template.title}`);
+          // Carousel images were converted to a slideshow video by albumProcessingWorker
+          console.log(`🖼️ [CHILD] Posting carousel slideshow video...`);
+          console.log(`   File: ${media.filePath}`);
           console.log(`   Description: ${processedDescription.substring(0, 60)}...`);
 
-          const response = await createTikTokCarouselPost({
-            title: template.title,
-            text: processedDescription,
-            mediaIds: mediaIds,
-            details: DEFAULT_TIKTOK_DETAILS
-          });
+          await uploadVideoToTikTok(media.filePath, processedDescription);
+          console.log(`✅ [CHILD] Carousel slideshow uploaded to TikTok successfully!`);
 
-          postJobId = response.job_id;
-          console.log(`✅ [CHILD] Carousel post created with job ID: ${postJobId}`);
+          await sendNotification(
+            `✅ TikTok carousel slideshow published!\n\nCaption: ${processedDescription.substring(0, 120)}...`
+          );
+
+          postResult = {
+            success: true,
+            type,
+            processedDescription,
+            filePath: media.filePath,
+          };
 
         } else {
           throw new Error(`Unknown post type: ${type}`);
         }
 
-        // Poll job status until completion
-        console.log(`\n⏳ [CHILD] Polling job status for ${postJobId}...`);
-        const jobStatus = await pollPostJobStatus(postJobId, {
-          pollInterval: 10000, // Poll every 10 seconds
-          maxWaitMs: 300000    // Max 5 minutes timeout
-        });
-
-        if (jobStatus.success) {
-          console.log(`✅ [CHILD] TikTok post completed successfully!`);
-        } else {
-          console.error(`❌ [CHILD] TikTok post failed:`, jobStatus?.failures);
-        }
-
-        // Wait 3 minutes after post completion/failure
-        console.log(`⏳ [CHILD] Waiting 3 minutes before next post can proceed...`);
-        await delay(POST_DELAY_MS);
-        console.log(`✅ [CHILD] 3-minute delay completed`);
-
-        postResult = {
-          success: jobStatus.success,
-          type,
-          postJobId,
-          processedDescription,
-          failures: jobStatus.failures,
-          ...(type === 'video' ? { videoIndex, publerId: media.publerId } : { imageCount: media.length })
-        };
+        // Wait a random 7–12 minutes after each post before the next one
+        const postDelayMs = POST_DELAY_MIN_MS + Math.random() * (POST_DELAY_MAX_MS - POST_DELAY_MIN_MS);
+        const postDelayMin = (postDelayMs / 60000).toFixed(1);
+        console.log(`⏳ [CHILD] Waiting ${postDelayMin} minutes before next post can proceed...`);
+        await delay(postDelayMs);
+        console.log(`✅ [CHILD] Delay completed`);
 
         console.log(`✅ [CHILD] Job ${job.name} completed`);
         return postResult;
@@ -175,11 +260,26 @@ function initializeTikTokWorker() {
 
   // Event handlers
   worker.on('completed', (job, result) => {
-    console.log(`✅ [CHILD] Job ${job.id} completed - Post ${result.success ? 'succeeded' : 'failed'}`);
+    console.log(`✅ [CHILD] Job ${job.id} - Post ${result.success ? 'succeeded' : (result.skipped ? 'skipped' : 'failed')}`);
+    // Clean up video temp file now that the job is fully done (after delay)
+    if (result.filePath) {
+      deleteTempFile(result.filePath);
+    }
   });
 
   worker.on('failed', (job, err) => {
-    console.error(`❌ [CHILD] Job ${job.id} failed:`, err.message);
+    const maxAttempts = job.opts?.attempts ?? 1;
+    const isPermanent = job.attemptsMade >= maxAttempts;
+
+    if (isPermanent) {
+      console.error(`❌ [CHILD] Job ${job.id} permanently failed after ${job.attemptsMade} attempt(s): ${err.message}`);
+      // Clean up video temp file only on permanent failure (no more retries)
+      if (job?.data?.media?.filePath) {
+        deleteTempFile(job.data.media.filePath);
+      }
+    } else {
+      console.warn(`⚠️ [CHILD] Job ${job.id} attempt ${job.attemptsMade}/${maxAttempts} failed, will retry: ${err.message}`);
+    }
   });
 
   worker.on('error', (err) => {
