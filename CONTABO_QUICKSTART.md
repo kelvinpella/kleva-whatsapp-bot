@@ -119,9 +119,9 @@ ssh -L 9222:localhost:9222 root@<your-server-ip>
 ```
 
 **Local Chrome:**
-1. Open `chrome://inspect`
-2. Under **"Remote Target"** click **"inspect"** next to the TikTok tab
-3. A DevTools panel opens — log into TikTok normally inside it
+1. Open `http://localhost:9222` — you will see a list of open pages
+2. Click the TikTok entry — a DevTools panel opens
+3. Log into TikTok normally inside the DevTools panel
 4. Go back to Terminal 1 and press **Enter**
 
 `cookies.txt` is created on the VPS next to `docker-compose.yml`. ✓

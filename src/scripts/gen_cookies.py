@@ -67,6 +67,7 @@ proc = subprocess.Popen(
     [
         chrome_bin,
         f'--remote-debugging-port={PORT}',
+        '--remote-debugging-address=0.0.0.0',  # bind to all interfaces so Docker can forward the port
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
@@ -84,10 +85,10 @@ print(
     f'\nChrome is running (headless) on port {PORT}.\n'
     f'\nFrom your LOCAL machine — open a new terminal and run:\n'
     f'  ssh -L {PORT}:localhost:{PORT} root@<your-server-ip>   (keep this open)\n'
-    f'\nThen open Chrome locally and go to:\n'
-    f'  chrome://inspect\n'
-    f'\nUnder "Remote Target" click "inspect" next to the TikTok tab.\n'
-    f'This opens a full DevTools panel — log into TikTok normally.\n',
+    f'\nThen open Chrome locally and navigate to:\n'
+    f'  http://localhost:{PORT}\n'
+    f'\nYou will see a list of open pages. Click the TikTok link to open DevTools.\n'
+    f'Log into TikTok normally, then come back here and press Enter.\n',
     file=sys.stderr,
 )
 
