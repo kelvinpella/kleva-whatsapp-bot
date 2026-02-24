@@ -47,12 +47,13 @@ def find_chrome():
 def to_netscape(cookies):
     lines = ['# Netscape HTTP Cookie File\n']
     for c in cookies:
-        domain = c['domain']
+        domain = c.get('domain', '')
         flag   = 'TRUE' if domain.startswith('.') else 'FALSE'
         secure = 'TRUE' if c.get('secure', False) else 'FALSE'
-        expiry = int(c.get('expires', 0)) if c.get('expires', 0) > 0 else 0
+        expiry = c.get('expires', 0) or 0
+        expiry = int(expiry) if expiry > 0 else 0
         lines.append(
-            '\t'.join([domain, flag, c['path'], secure, str(expiry), c['name'], c['value']])
+            '\t'.join([domain, flag, c.get('path', '/'), secure, str(expiry), c['name'], c['value']])
             + '\n'
         )
     return ''.join(lines)
@@ -102,11 +103,11 @@ with sync_playwright() as p:
         proc.terminate()
         sys.exit('No browser contexts found — did Chrome start correctly?')
     cookies = contexts[0].cookies()
-    browser.disconnect()
+    browser.close()  # closes the CDP connection, does not kill the external Chrome process
 
 proc.terminate()
 
-tiktok_cookies = [c for c in cookies if 'tiktok' in c['domain']]
+tiktok_cookies = [c for c in cookies if 'tiktok' in c.get('domain', '')]
 if not tiktok_cookies:
     sys.exit('No TikTok cookies found — make sure you logged in successfully.')
 
