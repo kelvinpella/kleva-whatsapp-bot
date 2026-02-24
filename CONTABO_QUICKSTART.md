@@ -1,8 +1,8 @@
-# Hostinger VPS — Deployment Guide
+# Contabo VPS — Deployment Guide
 
 ## Prerequisites
 
-- Hostinger VPS (Ubuntu 22.04 recommended)
+- Contabo VPS (choose Ubuntu 22.04 when provisioning)
 - SSH access to the server
 - Docker + Docker Compose installed on the server
 - TikTok `cookies.txt` ready (export from browser using a Netscape cookie extension)
