@@ -42,9 +42,9 @@ async function handleGroupMessage(msg, db, client) {
   const groupId = msg.from;
 
   // Environment-based filtering: dev only processes /bottest, production ignores /bottest
-  if (!shouldProcessMessage(msg)) {
-    return;
-  }
+  // if (!shouldProcessMessage(msg)) {
+  //   return;
+  // }
 
   try {
     // Get allowed groups from environment variable

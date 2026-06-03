@@ -55,7 +55,6 @@ async function startBot() {
       onMessage: async (msg) => {
         // Route messages based on type (group vs private)
         const chat = await msg.getChat();
-
         if (chat.isGroup) {
           // Group message - handle TikTok upload
           await handleGroupMessage(msg, db, client);
