@@ -55,8 +55,8 @@ async function initializeClient() {
   const puppeteerConfig = {
     headless: true,
     args: puppeteerArgs,
-    timeout: 60000,
-    protocolTimeout: 180000 // Increase protocol timeout to 3 minutes for Railway
+    timeout: 120000,
+    protocolTimeout: 600000 // Increase protocol timeout to 10 minutes for slow environments
   };
 
   // Use system Chromium in Docker/production
