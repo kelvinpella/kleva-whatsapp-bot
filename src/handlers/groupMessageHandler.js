@@ -16,7 +16,7 @@ const { parseCaption } = require('../utils/captionParser');
 const { consumeLatestPendingAlbum } = require('../utils/pendingAlbums');
 
 // Initialize Redis connection
-// Uses REDIS_URL env var if available (Railway), otherwise defaults to localhost
+// Uses REDIS_URL env var if available (production), otherwise defaults to localhost
 const redisConnection = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
   maxRetriesPerRequest: null,
 });

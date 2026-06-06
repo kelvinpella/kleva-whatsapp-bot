@@ -12,7 +12,7 @@ let client = null;
 
 /**
  * Initialize WhatsApp client with authentication
- * Uses Redis-based auth for Railway (when REDIS_URL is set)
+ * Uses Redis-based auth in production (when REDIS_URL is set)
  * Uses filesystem-based auth for local development
  * @returns {Promise<Client>} Initialized WhatsApp client
  */
@@ -31,13 +31,13 @@ async function initializeClient() {
 
   if (config.nodeEnv === 'production') {
     puppeteerArgs.push('--disable-gpu');
-    puppeteerArgs.push('--single-process'); // Help with Railway memory constraints
+    puppeteerArgs.push('--single-process'); // Help with constrained VPS memory
   }
 
   // Choose auth strategy based on environment
   let authStrategy;
   if (process.env.REDIS_URL) {
-    // Production (Railway): Use Redis-based session storage with RemoteAuth
+    // Production: Use Redis-based session storage with RemoteAuth
     console.log('📦 Using RemoteAuth (Redis) for session persistence');
     const redisStore = new RedisStore();
     authStrategy = new RemoteAuth({
@@ -88,7 +88,7 @@ function setupEventHandlers(client, handlers = {}) {
     console.log('\n📱 QR Code received — scan with WhatsApp on your phone:\n');
     qrcode.generate(qr, { small: true });
 
-    // Also output QR code URL for generating image online (useful for Railway)
+    // Also output QR code URL for generating image online (useful for headless servers)
     console.log('\n🔗 Alternative: Generate QR image at:');
     console.log(`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qr)}`);
     console.log('\nOpen this URL in your browser, then scan the QR image with WhatsApp.\n');

@@ -1,0 +1,42 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: kleva-redis
+    restart: unless-stopped
+    # Persist WhatsApp session (RemoteAuth) + BullMQ jobs across restarts/redeploys.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: kleva-bot
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    # App secrets/config come from .env on the server (see CONTABO_DEPLOYMENT.md).
+    env_file:
+      - .env
+    # These override anything in .env so the container always talks to the redis
+    # service and uses the system Chromium baked into the image.
+    environment:
+      NODE_ENV: production
+      REDIS_URL: redis://redis:6379
+      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
+    volumes:
+      # Keep the local WhatsApp auth/cache working dirs across container rebuilds.
+      - wwebjs-auth:/app/.wwebjs_auth
+      - wwebjs-cache:/app/.wwebjs_cache
+
+volumes:
+  redis-data:
+  wwebjs-auth:
+  wwebjs-cache:
