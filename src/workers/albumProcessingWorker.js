@@ -4,16 +4,14 @@
  * Processes album batches from WhatsApp:
  * - Downloads all media from messages
  * - Categorizes and applies limits
- * - Uploads to Publer
- * - Creates child jobs for TikTok posting
+ * - Uploads all selected images to Cloudinary
+ * - Creates child jobs for social posting via Zernio
  */
 
 const { Worker, Queue } = require('bullmq');
 const Redis = require('ioredis');
-const { uploadMediaToPubler } = require('./mediaUploader');
 const {
   uploadImageToCloudinary,
-  transformAndDownloadImage,
   buildTemplateUrl,
 } = require('../services/cloudinaryClient');
 
@@ -31,8 +29,8 @@ function initializeAlbumWorker(client, db) {
     maxRetriesPerRequest: null,
   });
 
-  // Create queue for child jobs (TikTok posting)
-  const tiktokPostingQueue = new Queue('tiktokPosting', {
+  // Create queue for child jobs (Social posting via Zernio)
+  const socialPostingQueue = new Queue('socialPosting', {
     connection: redisConnection,
     defaultJobOptions: {
       attempts: 1,              // max 1 retry attempts
@@ -89,101 +87,106 @@ function initializeAlbumWorker(client, db) {
         console.log(`📊 Album totals: ${allVideos.length} videos, ${allImages.length} images`);
 
         // Apply limits
-        // ❌ Videos will not be uploaded to Cloudinary (commented out)
+        // ❌ Videos will not be uploaded to Cloudinary yet; future logic will be implemented
+        //     after uncommenting limitedVideos and handling video uploads.
         // const limitedVideos = allVideos.slice(0, MAX_VIDEOS);
         let limitedImages = allImages.slice(0, MAX_IMAGES);
 
-        if (allVideos.length > MAX_VIDEOS) {
-          console.log(`⚠️ Dropped ${allVideos.length - MAX_VIDEOS} videos (max ${MAX_VIDEOS})`);
+        if (allVideos.length > 0) {
+          console.log(`⚠️ ${allVideos.length} video(s) detected; video posting logic is pending future implementation once limitedVideos is enabled.`);
+          if (allVideos.length > MAX_VIDEOS) {
+            console.log(`⚠️ Dropped ${allVideos.length - MAX_VIDEOS} videos (max ${MAX_VIDEOS})`);
+          }
+
+          // Skip image upload logic while video posting is not implemented
+          return {
+            childJobIds: [],
+            summary: {
+              messageIds,
+              groupId,
+              groupName,
+              totalImages: limitedImages.length,
+              transformedImages: 0,
+              droppedImages: Math.max(0, allImages.length - MAX_IMAGES),
+              droppedVideos: Math.max(0, allVideos.length - MAX_VIDEOS),
+              childJobsCreated: 0,
+              videoDetected: true,
+            }
+          };
         }
+
         if (allImages.length > MAX_IMAGES) {
           console.log(`⚠️ Dropped ${allImages.length - MAX_IMAGES} images (max ${MAX_IMAGES})`);
         }
 
-        // Upload first 2 images to Cloudinary and transform them
-        console.log(`\n🌥️ Processing images with Cloudinary...`);
-        const imagesToTransform = limitedImages.slice(0, 2); // Only first 2 images
-        const transformedImageIndices = []; // Track which indices were transformed
+        // Upload all limited images to Cloudinary in parallel; map preserves original order.
+        console.log(`\n🌥️ Uploading all limited images to Cloudinary...`);
+        const transformedImageIndices = [];
 
-        for (let i = 0; i < imagesToTransform.length; i++) {
-          try {
-            const image = imagesToTransform[i];
-            const extension = getFileExtension(image.mimetype);
-            const filename = `kleva_image_${timestamp}_${i}.${extension}`;
+        const uploadedImageUrls = await Promise.all(
+          limitedImages.map(async (image, i) => {
+            try {
+              const extension = getFileExtension(image.mimetype);
+              const filename = `kleva_image_${timestamp}_${i}.${extension}`;
 
-            console.log(`\n📸 [Image ${i}] Uploading to Cloudinary: ${filename}`);
-            const buffer = Buffer.from(image.data, 'base64');
+              console.log(`📸 [Image ${i}] Uploading to Cloudinary: ${filename}`);
+              const buffer = Buffer.from(image.data, 'base64');
+              const cloudinaryResult = await uploadImageToCloudinary(buffer, filename);
+              const originalUrl = cloudinaryResult.secure_url || cloudinaryResult.url;
+              const publicFileName = `${cloudinaryResult.public_id}.${extension}`;
 
-            // Upload to Cloudinary
-            const cloudinaryResult = await uploadImageToCloudinary(buffer, filename);
-            const publicId = cloudinaryResult.public_id;
+              if (i < 2) {
+                transformedImageIndices.push(i);
+                console.log(`🔄 [Image ${i}] Transformed URL preserved at position ${i}`);
+                return buildTemplateUrl(publicFileName, i);
+              }
 
-            console.log(`✅ [Image ${i}] Cloudinary ID: ${publicId}`);
+              console.log(`✅ [Image ${i}] Uploaded URL preserved at position ${i}`);
+              return originalUrl;
+            } catch (error) {
+              console.error(`❌ [Image ${i}] Failed to upload/process with Cloudinary:`, error.message);
+              return null;
+            }
+          })
+        );
 
-            const publicFileName = `${publicId}.${extension}`;
-            const transformedUrl = buildTemplateUrl(publicFileName, i);
-            console.log(`🔄 [Image ${i}] Transformed URL: ${transformedUrl}`);
-
-            // Download the transformed image
-            const transformedBuffer = await transformAndDownloadImage(publicFileName, i);
-
-            // Replace the original image in limitedImages with the transformed version
-            const transformedImageItem = {
-              mimetype: image.mimetype,
-              data: transformedBuffer.toString('base64'),
-              filename: filename,
-              cloudinaryPublicId: publicId,
-              transformedUrl: transformedUrl,
-            };
-
-            limitedImages[i] = transformedImageItem;
-            transformedImageIndices.push(i);
-
-            console.log(`✅ [Image ${i}] Replaced in limitedImages at index ${i}`);
-          } catch (error) {
-            console.error(`❌ [Image ${i}] Failed to process with Cloudinary:`, error.message);
-            // Keep the original image if transformation fails
-          }
-        }
+        transformedImageIndices.sort((a, b) => a - b);
+        const limitedImageUrls = uploadedImageUrls.filter(Boolean);
 
         // Log final status
         console.log(`\n✅ Image Processing Complete:`);
-        console.log(`   - Transformed images: ${transformedImageIndices.length} at indices [${transformedImageIndices.join(', ')}]`);
-        console.log(`   - Total images in limitedImages: ${limitedImages.length}`);
-        console.log(`   - Remaining images unchanged: ${limitedImages.length - transformedImageIndices.length}`);
+        console.log(`   - Total uploaded images: ${uploadedImageUrls.length}`);
+        console.log(`   - Transformed image URLs: ${transformedImageIndices.length} at indices [${transformedImageIndices.join(', ')}]`);
+        console.log(`   - Final media URLs count: ${limitedImageUrls.length}`);
 
-        // Create and add child jobs for TikTok posting using transformed images
+        // Create and add child jobs for social posting using Cloudinary media URLs
         const childJobIds = [];
 
-        // Create one child job for carousel (if transformed images exist)
-        if (limitedImages.length > 0) {
-          const validImages = limitedImages.filter(img => img);
-          if (validImages.length > 0) {
-            const jobName = `post-carousel-${groupId}-${timestamp}`;
-            const childJob = await tiktokPostingQueue.add(
-              jobName,
-              {
-                type: 'carousel',
-                media: validImages,
-                groupName,
-                timestamp,
-                messageBody
+        if (limitedImageUrls.length > 0) {
+          const jobName = `social-post-carousel-${groupId}-${timestamp}`;
+          const childJob = await socialPostingQueue.add(
+            jobName,
+            {
+              type: 'carousel',
+              mediaUrls: limitedImageUrls,
+              groupName,
+              timestamp,
+              messageBody,
+            },
+            {
+              attempts: 2,
+              backoff: {
+                type: 'exponential',
+                delay: 5000,
               },
-              {
-                attempts: 2,
-                backoff: {
-                  type: 'exponential',
-                  delay: 5000,
-                },
-              }
-            );
-            childJobIds.push(childJob.id);
-            console.log(`✅ Created carousel post job: ${jobName}`);
-          }
+            }
+          );
+          childJobIds.push(childJob.id);
+          console.log(`✅ Created social post job: ${jobName}`);
         }
 
-        console.log(`\n✅ [PARENT] Created ${childJobIds.length} child job(s) for TikTok posting`);
-        console.log(`   - ${limitedImages.filter(i => i).length} image(s) in carousel`);
+        console.log(`\n✅ [PARENT] Created ${childJobIds.length} child job(s) for social posting`);
+        console.log(`   - ${limitedImageUrls.length} image(s) in carousel`);
 
         return {
           childJobIds,
@@ -211,7 +214,7 @@ function initializeAlbumWorker(client, db) {
 
   // Event handlers
   worker.on('completed', (job, result) => {
-    console.log(`✅ [PARENT] Job ${job.id} completed - processed ${result.summary.processedImages} images`);
+    console.log(`✅ [PARENT] Job ${job.id} completed - processed ${result.summary.totalImages} images`);
   });
 
   worker.on('failed', (job, err) => {

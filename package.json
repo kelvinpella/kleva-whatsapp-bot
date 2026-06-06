@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.107.0",
+    "@zernio/node": "^0.2.222",
     "archiver": "^8.0.0",
     "axios": "^1.17.0",
     "bullmq": "^5.78.0",
