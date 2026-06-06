@@ -8,12 +8,12 @@ require('dotenv').config();
 const { initializeClient, setupEventHandlers, startClient, waitForClientReady, listChats, destroyClient } = require('./core/whatsapp');
 const { handleGroupMessage } = require('./handlers/groupMessageHandler');
 const { initializeAlbumWorker } = require('./workers/albumProcessingWorker');
-const { initializeTikTokWorker } = require('./workers/tiktokPostingWorker');
+const { initializeSocialPostingWorker } = require('./workers/socialPostingWorker');
 
 let client = null;
 let db = null;
 let albumWorker = null;
-let tiktokWorker = null;
+let socialWorker = null;
 
 /**
  * Start the bot
@@ -46,16 +46,15 @@ async function startBot() {
         console.log('  → Album processing worker (parent)');
         albumWorker = initializeAlbumWorker(client, db);
 
-        // Child worker: Posts to TikTok with status polling and delays
-        console.log('  → TikTok posting worker (child)');
-        tiktokWorker = initializeTikTokWorker();
+        // Child worker: Posts to social platforms via Zernio schedule
+        console.log('  → Social posting worker (child)');
+        socialWorker = initializeSocialPostingWorker();
 
         console.log('✅ Workers initialized');
       },
       onMessage: async (msg) => {
         // Route messages based on type (group vs private)
         const chat = await msg.getChat();
-
         if (chat.isGroup) {
           // Group message - handle TikTok upload
           await handleGroupMessage(msg, db, client);
@@ -95,9 +94,9 @@ async function shutdown() {
       await albumWorker.close();
     }
 
-    if (tiktokWorker) {
-      console.log('Closing TikTok posting worker...');
-      await tiktokWorker.close();
+    if (socialWorker) {
+      console.log('Closing social posting worker...');
+      await socialWorker.close();
     }
 
     // Close database connection

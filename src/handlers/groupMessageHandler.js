@@ -12,6 +12,8 @@ const { Queue } = require('bullmq');
 const Redis = require('ioredis');
 const { addMessageToBatch } = require('../utils/albumBatcher');
 const { shouldProcessMessage } = require('../utils/messageFilter');
+const { parseCaption } = require('../utils/captionParser');
+const { consumeLatestPendingAlbum } = require('../utils/pendingAlbums');
 
 // Initialize Redis connection
 // Uses REDIS_URL env var if available (Railway), otherwise defaults to localhost
@@ -24,6 +26,22 @@ const albumProcessingQueue = new Queue('albumProcessing', {
   connection: redisConnection, removeOnComplete:true,
   removeOnFail: {
     age: 2 * 24 * 3600 // keep failed jobs for 2 days
+  }
+});
+
+// Queue for social posting jobs, created once a caption is matched to an album
+const socialPostingQueue = new Queue('socialPosting', {
+  connection: redisConnection,
+  defaultJobOptions: {
+    attempts: 2,
+    backoff: {
+      type: 'exponential',
+      delay: 5000,
+    },
+    removeOnComplete: true,
+    removeOnFail: {
+      age: 4 * 3600 // remove failed jobs after 4 hours
+    }
   }
 });
 
@@ -42,9 +60,9 @@ async function handleGroupMessage(msg, db, client) {
   const groupId = msg.from;
 
   // Environment-based filtering: dev only processes /bottest, production ignores /bottest
-  if (!shouldProcessMessage(msg)) {
-    return;
-  }
+  // if (!shouldProcessMessage(msg)) {
+  //   return;
+  // }
 
   try {
     // Get allowed groups from environment variable
@@ -71,9 +89,33 @@ async function handleGroupMessage(msg, db, client) {
 
     console.log(`\n📨 Received message from allowed group: ${groupName} (${groupId})`);
 
-    // Check if message contains media
+    // Text-only message: it may be the caption for a previously-posted album.
     if (!msg.hasMedia) {
-      console.log(`⏭️ Message has no media, ignoring...`);
+      const caption = parseCaption(msg.body || '');
+      if (!caption) {
+        console.log(`⏭️ Message has no media and is not a caption, ignoring...`);
+        return;
+      }
+
+      console.log(`📝 Caption parsed -> brand: ${caption.brand || '(none)'} | price: ${caption.priceText || '(none)'} | bullets: ${caption.bullets.length}`);
+      console.log(`📝 Caption message detected; looking for a pending album in this group...`);
+      const pendingAlbum = await consumeLatestPendingAlbum(redisConnection, groupId);
+      if (!pendingAlbum) {
+        console.log(`⚠️ Caption received but no pending album found for group ${groupId}; ignoring.`);
+        return;
+      }
+
+      const jobName = `social-post-carousel-${groupId}-${Date.now()}`;
+      await socialPostingQueue.add(jobName, {
+        type: 'carousel',
+        images: pendingAlbum.images,
+        caption,
+        groupName: pendingAlbum.groupName || groupName,
+        timestamp: pendingAlbum.timestamp,
+        messageBody: pendingAlbum.messageBody,
+      });
+
+      console.log(`✅ Matched caption to album and created social post job: ${jobName}`);
       return;
     }
 

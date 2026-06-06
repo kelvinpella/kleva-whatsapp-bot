@@ -4,13 +4,15 @@
  * Processes album batches from WhatsApp:
  * - Downloads all media from messages
  * - Categorizes and applies limits
- * - Uploads to Publer
- * - Creates child jobs for TikTok posting
+ * - Uploads all selected images to Cloudinary
+ * - Parks the uploaded images as a pending album in Redis until a caption
+ *   message arrives (social posting is queued later by the caption handler)
  */
 
-const { Worker, Queue } = require('bullmq');
+const { Worker } = require('bullmq');
 const Redis = require('ioredis');
-const { uploadMediaToPubler } = require('./mediaUploader');
+const { uploadImageToCloudinary } = require('../services/cloudinaryClient');
+const { savePendingAlbum } = require('../utils/pendingAlbums');
 
 const MAX_VIDEOS = 2;
 const MAX_IMAGES = 10;
@@ -24,22 +26,6 @@ const MAX_IMAGES = 10;
 function initializeAlbumWorker(client, db) {
   const redisConnection = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
     maxRetriesPerRequest: null,
-  });
-
-  // Create queue for child jobs (TikTok posting)
-  const tiktokPostingQueue = new Queue('tiktokPosting', {
-    connection: redisConnection,
-    defaultJobOptions: {
-      attempts: 1,              // max 1 retry attempts
-      backoff: {
-        type: 'exponential',
-        delay: 5000             // 5s, 10s, 20s
-      },
-      removeOnComplete: true,
-      removeOnFail: {
-        age: 4 * 3600           // remove failed jobs after 4 hours
-      }
-    }
   });
 
   const worker = new Worker(
@@ -84,101 +70,93 @@ function initializeAlbumWorker(client, db) {
         console.log(`📊 Album totals: ${allVideos.length} videos, ${allImages.length} images`);
 
         // Apply limits
-        const limitedVideos = allVideos.slice(0, MAX_VIDEOS);
-        const limitedImages = allImages.slice(0, MAX_IMAGES);
+        // ❌ Videos will not be uploaded to Cloudinary yet; future logic will be implemented
+        //     after uncommenting limitedVideos and handling video uploads.
+        // const limitedVideos = allVideos.slice(0, MAX_VIDEOS);
+        let limitedImages = allImages.slice(0, MAX_IMAGES);
 
-        if (allVideos.length > MAX_VIDEOS) {
-          console.log(`⚠️ Dropped ${allVideos.length - MAX_VIDEOS} videos (max ${MAX_VIDEOS})`);
+        if (allVideos.length > 0) {
+          console.log(`⚠️ ${allVideos.length} video(s) detected; video posting logic is pending future implementation once limitedVideos is enabled.`);
+          if (allVideos.length > MAX_VIDEOS) {
+            console.log(`⚠️ Dropped ${allVideos.length - MAX_VIDEOS} videos (max ${MAX_VIDEOS})`);
+          }
+
+          // Skip image upload logic while video posting is not implemented
+          return {
+            pendingAlbumKey: null,
+            summary: {
+              messageIds,
+              groupId,
+              groupName,
+              totalImages: limitedImages.length,
+              droppedImages: Math.max(0, allImages.length - MAX_IMAGES),
+              droppedVideos: Math.max(0, allVideos.length - MAX_VIDEOS),
+              pendingAlbumSaved: false,
+              videoDetected: true,
+            }
+          };
         }
+
         if (allImages.length > MAX_IMAGES) {
           console.log(`⚠️ Dropped ${allImages.length - MAX_IMAGES} images (max ${MAX_IMAGES})`);
         }
 
-        // Upload all media to Publer
-        console.log(`\n📤 Uploading media to Publer...`);
-        const { uploadedVideos, uploadedImages } = await uploadMediaToPubler({
-          videos: limitedVideos,
-          images: limitedImages,
-          timestamp
-        });
+        // Upload all limited images to Cloudinary in parallel; map preserves original order.
+        // Transformation/text overlays are applied later (once captions arrive), so here we
+        // only persist each image's public file name and original URL.
+        console.log(`\n🌥️ Uploading all limited images to Cloudinary...`);
 
-        console.log(`✅ Uploaded: ${uploadedVideos.length} videos, ${uploadedImages.length} images`);
-        console.log(`📹 Video Publer IDs:`, uploadedVideos.map(v => v.publerId).filter(id => id));
-        console.log(`📸 Image Publer IDs:`, uploadedImages.map(i => i.publerId).filter(id => id));
+        const uploadResults = await Promise.all(
+          limitedImages.map(async (image, i) => {
+            try {
+              const extension = getFileExtension(image.mimetype);
+              const filename = `kleva_image_${timestamp}_${i}.${extension}`;
 
-        // Create and add child jobs for TikTok posting
-        const childJobIds = [];
+              console.log(`📸 [Image ${i}] Uploading to Cloudinary: ${filename}`);
+              const buffer = Buffer.from(image.data, 'base64');
+              const cloudinaryResult = await uploadImageToCloudinary(buffer, filename);
+              const originalUrl = cloudinaryResult.secure_url || cloudinaryResult.url;
+              const publicFileName = `${cloudinaryResult.public_id}.${extension}`;
 
-        // Create one child job per video
-        for (let i = 0; i < uploadedVideos.length; i++) {
-          const video = uploadedVideos[i];
-          if (video.publerId) {
-            const jobName = `post-video-${groupId}-${timestamp}-${i}`;
-            const childJob = await tiktokPostingQueue.add(
-              jobName,
-              {
-                type: 'video',
-                media: video,
-                groupName,
-                timestamp,
-                messageBody,
-                videoIndex: i
-              },
-              {
-                attempts: 2,
-                backoff: {
-                  type: 'exponential',
-                  delay: 5000,
-                },
-              }
-            );
-            childJobIds.push(childJob.id);
-            console.log(`✅ Created video post job: ${jobName}`);
-          }
+              console.log(`✅ [Image ${i}] Uploaded at position ${i}`);
+              return { publicFileName, originalUrl };
+            } catch (error) {
+              console.error(`❌ [Image ${i}] Failed to upload to Cloudinary:`, error.message);
+              return null;
+            }
+          })
+        );
+
+        const images = uploadResults.filter(Boolean);
+
+        console.log(`\n✅ Image Processing Complete:`);
+        console.log(`   - Total uploaded images: ${images.length}`);
+
+        // Park the uploaded album in Redis until a caption message arrives.
+        let pendingAlbumKey = null;
+        if (images.length > 0) {
+          pendingAlbumKey = await savePendingAlbum(redisConnection, {
+            groupId,
+            groupName,
+            author,
+            timestamp,
+            messageBody,
+            images,
+          });
+          console.log(`📥 [PARENT] Saved pending album (awaiting caption): ${pendingAlbumKey}`);
+        } else {
+          console.log(`⚠️ [PARENT] No images uploaded; nothing to park.`);
         }
-
-        // Create one child job for carousel (if images exist)
-        if (uploadedImages.length > 0) {
-          const validImages = uploadedImages.filter(img => img.publerId);
-          if (validImages.length > 0) {
-            const jobName = `post-carousel-${groupId}-${timestamp}`;
-            const childJob = await tiktokPostingQueue.add(
-              jobName,
-              {
-                type: 'carousel',
-                media: validImages,
-                groupName,
-                timestamp,
-                messageBody
-              },
-              {
-                attempts: 2,
-                backoff: {
-                  type: 'exponential',
-                  delay: 5000,
-                },
-              }
-            );
-            childJobIds.push(childJob.id);
-            console.log(`✅ Created carousel post job: ${jobName}`);
-          }
-        }
-
-        console.log(`\n✅ [PARENT] Created ${childJobIds.length} child job(s) for TikTok posting`);
-        console.log(`   - ${uploadedVideos.filter(v => v.publerId).length} video post(s)`);
-        console.log(`   - ${uploadedImages.filter(i => i.publerId).length > 0 ? 1 : 0} carousel post`);
 
         return {
-          childJobIds,
+          pendingAlbumKey,
           summary: {
             messageIds,
             groupId,
             groupName,
-            totalVideos: uploadedVideos.length,
-            totalImages: uploadedImages.length,
-            droppedVideos: Math.max(0, allVideos.length - MAX_VIDEOS),
+            totalImages: images.length,
             droppedImages: Math.max(0, allImages.length - MAX_IMAGES),
-            childJobsCreated: childJobIds.length
+            pendingAlbumSaved: Boolean(pendingAlbumKey),
           }
         };
 
@@ -195,7 +173,7 @@ function initializeAlbumWorker(client, db) {
 
   // Event handlers
   worker.on('completed', (job, result) => {
-    console.log(`✅ [PARENT] Job ${job.id} completed - created ${result.childJobIds.length} child jobs`);
+    console.log(`✅ [PARENT] Job ${job.id} completed - processed ${result.summary.totalImages} images`);
   });
 
   worker.on('failed', (job, err) => {
@@ -209,6 +187,27 @@ function initializeAlbumWorker(client, db) {
   console.log('🚀 Album Processing Worker (Parent) started');
 
   return worker;
+}
+
+/**
+ * Get file extension from mimetype
+ * @param {string} mimetype - MIME type (e.g., 'image/jpeg', 'video/mp4')
+ * @returns {string} File extension (e.g., 'jpg', 'mp4')
+ */
+function getFileExtension(mimetype) {
+  const mimetypeMap = {
+    'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
+    'image/png': 'png',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+    'video/mp4': 'mp4',
+    'video/mpeg': 'mpeg',
+    'video/quicktime': 'mov',
+    'video/webm': 'webm',
+  };
+
+  return mimetypeMap[mimetype] || 'bin';
 }
 
 /**

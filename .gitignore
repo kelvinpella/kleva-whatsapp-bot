@@ -37,4 +37,4 @@ yarn-error.log*
 tmp/
 temp/
 *.tmp
-dump.rdb
+dump.rdb*.rdb
