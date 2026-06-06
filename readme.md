@@ -137,11 +137,9 @@ npm run dev
 
 ## 🚀 Deployment
 
-- **Railway.app** — Easiest, free tier
-- **Render.com** — Free tier available  
-- **VPS** — Full control, $5-10/month
+- **Contabo VPS** — Docker Compose + auto-deploy on push to `main`
 
-See [SETUP.md](SETUP.md) for details.
+See [CONTABO_DEPLOYMENT.md](CONTABO_DEPLOYMENT.md) for the full guide.
 
 ## 📄 License
 

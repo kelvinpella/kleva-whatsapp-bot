@@ -48,7 +48,8 @@ function formatPrice(raw) {
   if (!Number.isFinite(number) || number <= 0) {
     return null;
   }
-  return `TSH: ${number.toLocaleString('en-US')}`;
+  const retail = number + 5000;
+  return `TSH: ${retail.toLocaleString('en-US')}`;
 }
 
 /**

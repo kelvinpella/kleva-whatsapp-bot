@@ -1,7 +1,7 @@
 # Dependencies
 node_modules/
-package-lock.json
 yarn.lock
+# NOTE: package-lock.json is intentionally committed — the Docker build uses `npm ci`
 
 # Environment & Credentials
 .env
@@ -37,4 +37,6 @@ yarn-error.log*
 tmp/
 temp/
 *.tmp
-dump.rdb*.rdb
+
+# Redis dumps (local dev)
+*.rdb

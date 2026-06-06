@@ -12,6 +12,10 @@ node_modules
 README.md
 docs/
 *.txt
+
+# Secrets — injected at runtime via docker-compose env_file, never baked into the image
+.env
+.env.*
 .env.example
 
 # Test files
@@ -38,6 +42,12 @@ temp/
 *.swp
 *.swo
 .wh..*
+
+# Redis dumps
+*.rdb
+
+# Compose file (not needed inside the image)
+docker-compose.yml
 
 # Session data (generated at runtime)
 .wwebjs_auth/
