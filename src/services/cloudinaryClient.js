@@ -60,6 +60,74 @@ function buildTemplateUrl(publicFileName, index = 0) {
 }
 
 /**
+ * The text overlays in TRANSFORM_URL_TEMPLATES are *double* URL-encoded (a space
+ * is %2520, ":" is %253A, "," is %252C) because Cloudinary first decodes the URL
+ * and then decodes the l_text payload. Re-encode caption text the same way so it
+ * can be substituted directly into the template.
+ * @param {string} text
+ * @returns {string}
+ */
+function doubleEncode(text) {
+  return encodeURIComponent(encodeURIComponent(text));
+}
+
+// Encoded placeholder strings present in each template, mapped to caption fields.
+const TEMPLATE_PLACEHOLDERS = [
+  {
+    // index 0
+    brand: 'Brand%2520name%2520goes%2520here',
+    price: 'TSH%253A%252050%252C000',
+  },
+  {
+    // index 1 — bullets keyed by on-image position
+    bullet0: 'Sifa%2520ya%2520kwanza%2520ya%2520pochi', // top
+    bullet1: 'Sifa%2520ya%2520pili%2520ya%2520pochi',   // middle
+    bullet2: 'Sifa%2520ya%2520tatu%2520ya%2520pochi',   // bottom
+  },
+];
+
+/**
+ * Build a transformed Cloudinary URL with caption text substituted into the
+ * template's placeholder overlays. Missing caption fields keep the template
+ * default. The uploaded image filename is swapped in via buildTemplateUrl.
+ * @param {string} publicFileName - File name with extension for the uploaded image
+ * @param {number} index - Template index (0 = brand/price, 1 = bullet features)
+ * @param {{brand?: string, priceText?: string, bullets?: string[]}} caption
+ * @returns {string} Transformed Cloudinary URL
+ */
+function buildDynamicTemplateUrl(publicFileName, index = 0, caption = {}) {
+  let url = buildTemplateUrl(publicFileName, index);
+  const placeholders = TEMPLATE_PLACEHOLDERS[index] || {};
+  const replacements = {};
+
+  if (index === 0) {
+    if (caption.brand) {
+      replacements[placeholders.brand] = doubleEncode(caption.brand);
+    }
+    if (caption.priceText) {
+      replacements[placeholders.price] = doubleEncode(caption.priceText);
+    }
+  } else if (index === 1) {
+    const bullets = caption.bullets || [];
+    if (bullets[0]) {
+      replacements[placeholders.bullet0] = doubleEncode(bullets[0]);
+    }
+    if (bullets[1]) {
+      replacements[placeholders.bullet1] = doubleEncode(bullets[1]);
+    }
+    if (bullets[2]) {
+      replacements[placeholders.bullet2] = doubleEncode(bullets[2]);
+    }
+  }
+
+  for (const [from, to] of Object.entries(replacements)) {
+    url = url.replace(from, to);
+  }
+
+  return url;
+}
+
+/**
  * Build a transformed Cloudinary URL with custom transformations
  * @param {string} publicId - Cloudinary public_id
  * @param {Object} transformations - Transformation parameters (e.g., { width: 1200, height: 1200, crop: 'limit', quality: 'auto' })
@@ -127,6 +195,7 @@ module.exports = {
   uploadImageToCloudinary,
   buildTransformedUrl,
   buildTemplateUrl,
+  buildDynamicTemplateUrl,
   downloadImageFromUrl,
   transformAndDownloadImage,
 };

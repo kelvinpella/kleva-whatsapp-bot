@@ -5,15 +5,14 @@
  * - Downloads all media from messages
  * - Categorizes and applies limits
  * - Uploads all selected images to Cloudinary
- * - Creates child jobs for social posting via Zernio
+ * - Parks the uploaded images as a pending album in Redis until a caption
+ *   message arrives (social posting is queued later by the caption handler)
  */
 
-const { Worker, Queue } = require('bullmq');
+const { Worker } = require('bullmq');
 const Redis = require('ioredis');
-const {
-  uploadImageToCloudinary,
-  buildTemplateUrl,
-} = require('../services/cloudinaryClient');
+const { uploadImageToCloudinary } = require('../services/cloudinaryClient');
+const { savePendingAlbum } = require('../utils/pendingAlbums');
 
 const MAX_VIDEOS = 2;
 const MAX_IMAGES = 10;
@@ -27,22 +26,6 @@ const MAX_IMAGES = 10;
 function initializeAlbumWorker(client, db) {
   const redisConnection = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
     maxRetriesPerRequest: null,
-  });
-
-  // Create queue for child jobs (Social posting via Zernio)
-  const socialPostingQueue = new Queue('socialPosting', {
-    connection: redisConnection,
-    defaultJobOptions: {
-      attempts: 1,              // max 1 retry attempts
-      backoff: {
-        type: 'exponential',
-        delay: 5000             // 5s, 10s, 20s
-      },
-      removeOnComplete: true,
-      removeOnFail: {
-        age: 4 * 3600           // remove failed jobs after 4 hours
-      }
-    }
   });
 
   const worker = new Worker(
@@ -100,16 +83,15 @@ function initializeAlbumWorker(client, db) {
 
           // Skip image upload logic while video posting is not implemented
           return {
-            childJobIds: [],
+            pendingAlbumKey: null,
             summary: {
               messageIds,
               groupId,
               groupName,
               totalImages: limitedImages.length,
-              transformedImages: 0,
               droppedImages: Math.max(0, allImages.length - MAX_IMAGES),
               droppedVideos: Math.max(0, allVideos.length - MAX_VIDEOS),
-              childJobsCreated: 0,
+              pendingAlbumSaved: false,
               videoDetected: true,
             }
           };
@@ -120,10 +102,11 @@ function initializeAlbumWorker(client, db) {
         }
 
         // Upload all limited images to Cloudinary in parallel; map preserves original order.
+        // Transformation/text overlays are applied later (once captions arrive), so here we
+        // only persist each image's public file name and original URL.
         console.log(`\n🌥️ Uploading all limited images to Cloudinary...`);
-        const transformedImageIndices = [];
 
-        const uploadedImageUrls = await Promise.all(
+        const uploadResults = await Promise.all(
           limitedImages.map(async (image, i) => {
             try {
               const extension = getFileExtension(image.mimetype);
@@ -135,69 +118,45 @@ function initializeAlbumWorker(client, db) {
               const originalUrl = cloudinaryResult.secure_url || cloudinaryResult.url;
               const publicFileName = `${cloudinaryResult.public_id}.${extension}`;
 
-              if (i < 2) {
-                transformedImageIndices.push(i);
-                console.log(`🔄 [Image ${i}] Transformed URL preserved at position ${i}`);
-                return buildTemplateUrl(publicFileName, i);
-              }
-
-              console.log(`✅ [Image ${i}] Uploaded URL preserved at position ${i}`);
-              return originalUrl;
+              console.log(`✅ [Image ${i}] Uploaded at position ${i}`);
+              return { publicFileName, originalUrl };
             } catch (error) {
-              console.error(`❌ [Image ${i}] Failed to upload/process with Cloudinary:`, error.message);
+              console.error(`❌ [Image ${i}] Failed to upload to Cloudinary:`, error.message);
               return null;
             }
           })
         );
 
-        transformedImageIndices.sort((a, b) => a - b);
-        const limitedImageUrls = uploadedImageUrls.filter(Boolean);
+        const images = uploadResults.filter(Boolean);
 
-        // Log final status
         console.log(`\n✅ Image Processing Complete:`);
-        console.log(`   - Total uploaded images: ${uploadedImageUrls.length}`);
-        console.log(`   - Transformed image URLs: ${transformedImageIndices.length} at indices [${transformedImageIndices.join(', ')}]`);
-        console.log(`   - Final media URLs count: ${limitedImageUrls.length}`);
+        console.log(`   - Total uploaded images: ${images.length}`);
 
-        // Create and add child jobs for social posting using Cloudinary media URLs
-        const childJobIds = [];
-
-        if (limitedImageUrls.length > 0) {
-          const jobName = `social-post-carousel-${groupId}-${timestamp}`;
-          const childJob = await socialPostingQueue.add(
-            jobName,
-            {
-              type: 'carousel',
-              mediaUrls: limitedImageUrls,
-              groupName,
-              timestamp,
-              messageBody,
-            },
-            {
-              attempts: 2,
-              backoff: {
-                type: 'exponential',
-                delay: 5000,
-              },
-            }
-          );
-          childJobIds.push(childJob.id);
-          console.log(`✅ Created social post job: ${jobName}`);
+        // Park the uploaded album in Redis until a caption message arrives.
+        let pendingAlbumKey = null;
+        if (images.length > 0) {
+          pendingAlbumKey = await savePendingAlbum(redisConnection, {
+            groupId,
+            groupName,
+            author,
+            timestamp,
+            messageBody,
+            images,
+          });
+          console.log(`📥 [PARENT] Saved pending album (awaiting caption): ${pendingAlbumKey}`);
+        } else {
+          console.log(`⚠️ [PARENT] No images uploaded; nothing to park.`);
         }
 
-        console.log(`\n✅ [PARENT] Created ${childJobIds.length} child job(s) for social posting`);
-        console.log(`   - ${limitedImageUrls.length} image(s) in carousel`);
-
         return {
-          childJobIds,
+          pendingAlbumKey,
           summary: {
             messageIds,
             groupId,
             groupName,
-            totalImages: limitedImages.length,
-            transformedImages: transformedImageIndices.length,
+            totalImages: images.length,
             droppedImages: Math.max(0, allImages.length - MAX_IMAGES),
-            childJobsCreated: childJobIds.length
+            pendingAlbumSaved: Boolean(pendingAlbumKey),
           }
         };
 

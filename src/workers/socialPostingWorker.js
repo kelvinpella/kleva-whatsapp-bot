@@ -11,6 +11,7 @@
 const { Worker } = require('bullmq');
 const Redis = require('ioredis');
 const { getRandomTemplate } = require('../services/tiktokPublisher');
+const { buildDynamicTemplateUrl } = require('../services/cloudinaryClient');
 const { getScheduledPosts, getLatestScheduledPost, scheduleSocialPost } = require('../services/zernioClient');
 
 const MAX_SCHEDULE_INTERVAL_HOURS = 2;
@@ -77,11 +78,19 @@ function initializeSocialPostingWorker() {
     async (job) => {
       try {
         console.log(`\n🔄 [CHILD] Processing social post job: ${job.name}`);
-        const { type, mediaUrls, groupName, timestamp, messageBody } = job.data;
+        const { type, images, caption, groupName, timestamp, messageBody } = job.data;
 
-        if (!Array.isArray(mediaUrls) || mediaUrls.length === 0) {
-          throw new Error('Missing mediaUrls for social post');
+        if (!Array.isArray(images) || images.length === 0) {
+          throw new Error('Missing images for social post');
         }
+
+        // Build the final carousel URLs: the first two images get the caption text
+        // overlaid via Cloudinary template transforms; the rest use their original URLs.
+        const mediaUrls = images.map((image, i) =>
+          i < 2
+            ? buildDynamicTemplateUrl(image.publicFileName, i, caption || {})
+            : image.originalUrl
+        );
 
         const template = getRandomTemplate();
         const processedDescription = processDescription(template.description, groupName, timestamp);
