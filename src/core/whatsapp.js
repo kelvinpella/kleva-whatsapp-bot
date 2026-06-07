@@ -3,17 +3,17 @@
  * Handles WhatsApp Web client initialization and event management
  */
 
-const { Client, LocalAuth, RemoteAuth } = require('whatsapp-web.js');
+const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const config = require('../config');
-const RedisStore = require('./RedisStore');
 
 let client = null;
 
 /**
- * Initialize WhatsApp client with authentication
- * Uses Redis-based auth in production (when REDIS_URL is set)
- * Uses filesystem-based auth for local development
+ * Initialize WhatsApp client with authentication.
+ * Uses LocalAuth (filesystem) for session storage. In production the
+ * .wwebjs_auth directory is a persistent Docker volume, so the session
+ * survives restarts and redeploys without needing to rescan the QR.
  * @returns {Promise<Client>} Initialized WhatsApp client
  */
 async function initializeClient() {
@@ -34,22 +34,10 @@ async function initializeClient() {
     puppeteerArgs.push('--single-process'); // Help with constrained VPS memory
   }
 
-  // Choose auth strategy based on environment
-  let authStrategy;
-  if (process.env.REDIS_URL) {
-    // Production: Use Redis-based session storage with RemoteAuth
-    console.log('📦 Using RemoteAuth (Redis) for session persistence');
-    const redisStore = new RedisStore();
-    authStrategy = new RemoteAuth({
-      clientId: 'kleva-bot',
-      store: redisStore,
-      backupSyncIntervalMs: 60000 // Sync every minute
-    });
-  } else {
-    // Local development: Use filesystem-based session storage
-    console.log('📂 Using LocalAuth (filesystem) for session storage');
-    authStrategy = new LocalAuth({ clientId: 'kleva-bot' });
-  }
+  // Filesystem-based session storage. Default dataPath is ./.wwebjs_auth, which
+  // is a persistent Docker volume in production (see docker-compose.yml).
+  console.log('📂 Using LocalAuth (filesystem) for session storage');
+  const authStrategy = new LocalAuth({ clientId: 'kleva-bot' });
 
   // Puppeteer configuration
   const puppeteerConfig = {
