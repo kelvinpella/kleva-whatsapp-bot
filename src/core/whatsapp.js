@@ -3,11 +3,47 @@
  * Handles WhatsApp Web client initialization and event management
  */
 
+const path = require('path');
+const fs = require('fs');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const config = require('../config');
 
 let client = null;
+
+const LOCAL_AUTH_CLIENT_ID = 'kleva-bot';
+const LOCAL_AUTH_DATA_PATH = path.resolve('./.wwebjs_auth');
+const CHROMIUM_PROFILE_LOCK_FILES = ['SingletonLock', 'SingletonSocket', 'SingletonCookie'];
+
+/**
+ * Remove stale Chromium singleton locks left behind when a container or process
+ * dies without a clean shutdown. Safe on startup when no browser is running yet.
+ */
+function clearStaleChromiumProfileLocks() {
+  const sessionDir = path.join(LOCAL_AUTH_DATA_PATH, `session-${LOCAL_AUTH_CLIENT_ID}`);
+
+  for (const lockFile of CHROMIUM_PROFILE_LOCK_FILES) {
+    const lockPath = path.join(sessionDir, lockFile);
+
+    try {
+      if (fs.existsSync(lockPath)) {
+        fs.rmSync(lockPath, { force: true });
+        console.log(`🔓 Removed stale Chromium lock: ${lockFile}`);
+      }
+    } catch (err) {
+      console.warn(`⚠️  Could not remove Chromium lock ${lockFile}:`, err.message);
+    }
+  }
+}
+
+function isChromiumProfileLockError(err) {
+  const message = `${err?.message || ''}\n${err?.stderr || ''}`;
+  return (
+    message.includes('profile appears to be in use') ||
+    message.includes('process_singleton') ||
+    message.includes('Code: 21')
+  );
+}
 
 /**
  * Initialize WhatsApp client with authentication.
@@ -18,6 +54,7 @@ let client = null;
  */
 async function initializeClient() {
   console.log('🤖 Initializing WhatsApp client...');
+  clearStaleChromiumProfileLocks();
 
   // Configure Puppeteer arguments
   const puppeteerArgs = [
@@ -37,7 +74,10 @@ async function initializeClient() {
   // Filesystem-based session storage. Default dataPath is ./.wwebjs_auth, which
   // is a persistent Docker volume in production (see docker-compose.yml).
   console.log('📂 Using LocalAuth (filesystem) for session storage');
-  const authStrategy = new LocalAuth({ clientId: 'kleva-bot' });
+  const authStrategy = new LocalAuth({
+    clientId: LOCAL_AUTH_CLIENT_ID,
+    dataPath: LOCAL_AUTH_DATA_PATH
+  });
 
   // Puppeteer configuration
   const puppeteerConfig = {
@@ -159,12 +199,18 @@ function setupEventHandlers(client, handlers = {}) {
  * Start the WhatsApp client
  * @param {Client} client - WhatsApp client instance
  */
-async function startClient(client) {
+async function startClient(client, retries = 1) {
   try {
     await client.initialize();
     console.log('✓ WhatsApp client initialized successfully\n');
     return client;
   } catch (err) {
+    if (retries > 0 && isChromiumProfileLockError(err)) {
+      console.log('🔓 Stale Chromium profile lock detected, clearing and retrying...');
+      clearStaleChromiumProfileLocks();
+      return startClient(client, retries - 1);
+    }
+
     console.error('❌ Failed to initialize client:', err.message);
     throw err;
   }
