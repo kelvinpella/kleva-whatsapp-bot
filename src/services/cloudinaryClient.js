@@ -44,7 +44,8 @@ async function uploadImageToCloudinary(buffer, filename) {
 
 const TRANSFORM_URL_TEMPLATES = [
   'https://res.cloudinary.com/dd7i14c28/image/upload/c_auto,g_auto,h_1350,w_1080/c_auto,g_auto,h_1350,w_1080/f_auto/q_auto/b_rgb:ffffff,co_rgb:000000,l_text:Montserrat_60_bold_center:Brand%2520name%2520goes%2520here/fl_layer_apply,fl_no_overflow,g_north,x_-16,y_128/b_rgb:ffffff,co_rgb:000000,l_text:Montserrat_50_left:TSH%253A%252050%252C000/fl_layer_apply,fl_no_overflow,g_west,x_160,y_-400/b_rgb:ffffff,co_rgb:000000,l_text:Montserrat_40_center:Tizama%2520picha%2520zaidi/fl_layer_apply,fl_no_overflow,g_south,y_80/l_Untitled_-_01_June_2026_at_14.47.07_1_vdi2ev/c_scale,fl_relative,w_0.06/fl_layer_apply,fl_no_overflow,g_center,x_-422,y_-400/WhatsApp_Image_2026-05-30_at_14.50.40_eppxr5.jpg',
-  'https://res.cloudinary.com/dd7i14c28/image/upload/c_auto,g_auto,h_1350,w_1080/c_auto,g_auto,h_1350,w_1080/f_auto/q_auto/b_rgb:ffffff,co_rgb:000000,l_text:Montserrat_50_left:Pochi%2520kali%2520na%2520classic%2520sana/fl_layer_apply,fl_no_overflow,g_west,x_139,y_-240/b_rgb:ffffff,co_rgb:000000,l_text:Montserrat_50_left:Pochi%2520nzuri%2520na%2520ya%2520kuvutia/fl_layer_apply,fl_no_overflow,g_west,x_139,y_-320/b_rgb:ffffff,co_rgb:000000,l_text:Montserrat_50_left:Pochi%2520kali%2520kwa%2520wadada%2520wote/fl_layer_apply,fl_no_overflow,g_west,x_139,y_-400/WhatsApp_Image_2026-05-30_at_14.50.40_eppxr5.jpg',
+  'https://res.cloudinary.com/dd7i14c28/image/upload/c_auto,g_auto,h_1350,w_1080/c_auto,g_auto,h_1350,w_1080/f_auto/q_auto/b_rgb:ffffff,co_rgb:000000,l_text:Montserrat_50_left:1.%2520Pochi%2520kali%2520na%2520classic%2520sana/fl_layer_apply,fl_no_overflow,g_west,x_139,y_-240/b_rgb:ffffff,co_rgb:000000,l_text:Montserrat_50_left:2.%2520Pochi%2520nzuri%2520na%2520ya%2520kuvutia/fl_layer_apply,fl_no_overflow,g_west,x_139,y_-320/b_rgb:ffffff,co_rgb:000000,l_text:Montserrat_50_left:3.%2520Pochi%2520kali%2520kwa%2520wadada%2520wote/fl_layer_apply,fl_no_overflow,g_west,x_139,y_-400/WhatsApp_Image_2026-05-30_at_14.50.40_eppxr5.jpg',
+  'https://res.cloudinary.com/dd7i14c28/image/upload/c_auto,g_auto,h_1350,w_1080/c_auto,g_auto,h_1350,w_1080/f_auto/q_auto/WhatsApp_Image_2026-05-30_at_14.50.40_eppxr5.jpg',
 ];
 
 /**
@@ -79,10 +80,13 @@ const TEMPLATE_PLACEHOLDERS = [
     price: 'TSH%253A%252050%252C000',
   },
   {
-    // index 1 — bullets keyed by on-image position
-    bullet0: 'Sifa%2520ya%2520kwanza%2520ya%2520pochi', // top
-    bullet1: 'Sifa%2520ya%2520pili%2520ya%2520pochi',   // middle
-    bullet2: 'Sifa%2520ya%2520tatu%2520ya%2520pochi',   // bottom
+    // index 1 — numbered bullet list keyed by on-image position (g_west: more negative y = higher)
+    bullet0: '1.%2520Pochi%2520kali%2520na%2520classic%2520sana', // bottom (y_-240)
+    bullet1: '2.%2520Pochi%2520nzuri%2520na%2520ya%2520kuvutia',   // middle (y_-320)
+    bullet2: '3.%2520Pochi%2520kali%2520kwa%2520wadada%2520wote',   // top (y_-400)
+  },
+  {
+    // index 2+ — no text overlays, pure transformation
   },
 ];
 
@@ -90,8 +94,9 @@ const TEMPLATE_PLACEHOLDERS = [
  * Build a transformed Cloudinary URL with caption text substituted into the
  * template's placeholder overlays. Missing caption fields keep the template
  * default. The uploaded image filename is swapped in via buildTemplateUrl.
+ * For index 2+, only the image filename is substituted (no text overlays).
  * @param {string} publicFileName - File name with extension for the uploaded image
- * @param {number} index - Template index (0 = brand/price, 1 = bullet features)
+ * @param {number} index - Template index (0 = brand/price, 1 = bullet features, 2+ = pure transformation)
  * @param {{brand?: string, priceText?: string, bullets?: string[]}} caption
  * @returns {string} Transformed Cloudinary URL
  */
@@ -109,16 +114,15 @@ function buildDynamicTemplateUrl(publicFileName, index = 0, caption = {}) {
     }
   } else if (index === 1) {
     const bullets = caption.bullets || [];
-    if (bullets[0]) {
-      replacements[placeholders.bullet0] = doubleEncode(bullets[0]);
-    }
-    if (bullets[1]) {
-      replacements[placeholders.bullet1] = doubleEncode(bullets[1]);
-    }
-    if (bullets[2]) {
-      replacements[placeholders.bullet2] = doubleEncode(bullets[2]);
-    }
+    // Template slots are bottom-to-top (y_-240, y_-320, y_-400); map 1→top … 3→bottom.
+    const bulletSlots = [placeholders.bullet2, placeholders.bullet1, placeholders.bullet0];
+    bullets.slice(0, 3).forEach((text, i) => {
+      if (text && bulletSlots[i]) {
+        replacements[bulletSlots[i]] = doubleEncode(text);
+      }
+    });
   }
+  // index 2+ has no placeholders, just return the url with swapped image filename
 
   for (const [from, to] of Object.entries(replacements)) {
     url = url.replace(from, to);

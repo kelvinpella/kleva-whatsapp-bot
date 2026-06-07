@@ -88,13 +88,17 @@ function setupEventHandlers(client, handlers = {}) {
   });
 
   // Client ready
-  client.on('ready', () => {
+  client.on('ready', async () => {
     console.log('✓ Client is ready and session is persisted!');
     console.log(`📊 Monitoring ${config.supplierGroupIds.length} supplier groups\n`);
 
-    // Call ready handler if provided
+    // Call ready handler if provided and ensure errors don't stop startup
     if (handlers.onReady) {
-      handlers.onReady(client);
+      try {
+        await handlers.onReady(client);
+      } catch (err) {
+        console.error('❌ Error in onReady handler:', err);
+      }
     }
   });
 

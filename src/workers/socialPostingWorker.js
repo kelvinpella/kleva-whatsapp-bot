@@ -84,12 +84,11 @@ function initializeSocialPostingWorker() {
           throw new Error('Missing images for social post');
         }
 
-        // Build the final carousel URLs: the first two images get the caption text
-        // overlaid via Cloudinary template transforms; the rest use their original URLs.
+        // Build the final carousel URLs:
+        // - Images 0 & 1 use their respective templates with caption text overlaid
+        // - Images 2+ use the shared transformation template (index 2) without text overlays
         const mediaUrls = images.map((image, i) =>
-          i < 2
-            ? buildDynamicTemplateUrl(image.publicFileName, i, caption || {})
-            : image.originalUrl
+          buildDynamicTemplateUrl(image.publicFileName, Math.min(i, 2), i < 2 ? caption || {} : {})
         );
 
         const template = getRandomTemplate();
