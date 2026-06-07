@@ -69,83 +69,70 @@ function initializeAlbumWorker(client, db) {
 
         console.log(`📊 Album totals: ${allVideos.length} videos, ${allImages.length} images`);
 
-        // Apply limits
-        // ❌ Videos will not be uploaded to Cloudinary yet; future logic will be implemented
-        //     after uncommenting limitedVideos and handling video uploads.
+        // Apply limits 
         // const limitedVideos = allVideos.slice(0, MAX_VIDEOS);
-        let limitedImages = allImages.slice(0, MAX_IMAGES);
+        const limitedImages = allImages.slice(0, MAX_IMAGES);
 
         if (allVideos.length > 0) {
           console.log(`⚠️ ${allVideos.length} video(s) detected; video posting logic is pending future implementation once limitedVideos is enabled.`);
-          if (allVideos.length > MAX_VIDEOS) {
-            console.log(`⚠️ Dropped ${allVideos.length - MAX_VIDEOS} videos (max ${MAX_VIDEOS})`);
-          }
 
-          // Skip image upload logic while video posting is not implemented
-          return {
-            pendingAlbumKey: null,
-            summary: {
-              messageIds,
-              groupId,
-              groupName,
-              totalImages: limitedImages.length,
-              droppedImages: Math.max(0, allImages.length - MAX_IMAGES),
-              droppedVideos: Math.max(0, allVideos.length - MAX_VIDEOS),
-              pendingAlbumSaved: false,
-              videoDetected: true,
-            }
-          };
         }
 
         if (allImages.length > MAX_IMAGES) {
           console.log(`⚠️ Dropped ${allImages.length - MAX_IMAGES} images (max ${MAX_IMAGES})`);
         }
 
-        // Upload all limited images to Cloudinary in parallel; map preserves original order.
-        // Transformation/text overlays are applied later (once captions arrive), so here we
-        // only persist each image's public file name and original URL.
-        console.log(`\n🌥️ Uploading all limited images to Cloudinary...`);
-
-        const uploadResults = await Promise.all(
-          limitedImages.map(async (image, i) => {
-            try {
-              const extension = getFileExtension(image.mimetype);
-              const filename = `kleva_image_${timestamp}_${i}.${extension}`;
-
-              console.log(`📸 [Image ${i}] Uploading to Cloudinary: ${filename}`);
-              const buffer = Buffer.from(image.data, 'base64');
-              const cloudinaryResult = await uploadImageToCloudinary(buffer, filename);
-              const originalUrl = cloudinaryResult.secure_url || cloudinaryResult.url;
-              const publicFileName = `${cloudinaryResult.public_id}.${extension}`;
-
-              console.log(`✅ [Image ${i}] Uploaded at position ${i}`);
-              return { publicFileName, originalUrl };
-            } catch (error) {
-              console.error(`❌ [Image ${i}] Failed to upload to Cloudinary:`, error.message);
-              return null;
-            }
-          })
-        );
-
-        const images = uploadResults.filter(Boolean);
-
-        console.log(`\n✅ Image Processing Complete:`);
-        console.log(`   - Total uploaded images: ${images.length}`);
-
         // Park the uploaded album in Redis until a caption message arrives.
         let pendingAlbumKey = null;
-        if (images.length > 0) {
-          pendingAlbumKey = await savePendingAlbum(redisConnection, {
-            groupId,
-            groupName,
-            author,
-            timestamp,
-            messageBody,
-            images,
-          });
-          console.log(`📥 [PARENT] Saved pending album (awaiting caption): ${pendingAlbumKey}`);
-        } else {
-          console.log(`⚠️ [PARENT] No images uploaded; nothing to park.`);
+        let processedImagesCount = 0
+
+        if (limitedImages.length > 0) {
+          // Upload all limited images to Cloudinary in parallel; map preserves original order.
+          // Transformation/text overlays are applied later (once captions arrive), so here we
+          // only persist each image's public file name and original URL.
+          console.log(`\n🌥️ Uploading all limited images to Cloudinary...`);
+
+          const uploadResults = await Promise.all(
+            limitedImages.map(async (image, i) => {
+              try {
+                const extension = getFileExtension(image.mimetype);
+                const filename = `kleva_image_${timestamp}_${i}.${extension}`;
+
+                console.log(`📸 [Image ${i}] Uploading to Cloudinary: ${filename}`);
+                const buffer = Buffer.from(image.data, 'base64');
+                const cloudinaryResult = await uploadImageToCloudinary(buffer, filename);
+                const originalUrl = cloudinaryResult.secure_url || cloudinaryResult.url;
+                const publicFileName = `${cloudinaryResult.public_id}.${extension}`;
+
+                console.log(`✅ [Image ${i}] Uploaded at position ${i}`);
+                return { publicFileName, originalUrl };
+              } catch (error) {
+                console.error(`❌ [Image ${i}] Failed to upload to Cloudinary:`, error.message);
+                return null;
+              }
+            })
+          );
+
+          const images = uploadResults.filter(Boolean);
+
+          console.log(`\n✅ Image Processing Complete:`);
+          console.log(`   - Total uploaded images: ${images.length}`);
+
+
+          if (images.length > 0) {
+            pendingAlbumKey = await savePendingAlbum(redisConnection, {
+              groupId,
+              groupName,
+              author,
+              timestamp,
+              messageBody,
+              images,
+            });
+            processedImagesCount = images.length;
+            console.log(`📥 [PARENT] Saved pending album (awaiting caption): ${pendingAlbumKey}`);
+          } else {
+            console.log(`⚠️ [PARENT] No images uploaded; nothing to park.`);
+          }
         }
 
         return {
@@ -154,7 +141,7 @@ function initializeAlbumWorker(client, db) {
             messageIds,
             groupId,
             groupName,
-            totalImages: images.length,
+            totalImages: processedImagesCount,
             droppedImages: Math.max(0, allImages.length - MAX_IMAGES),
             pendingAlbumSaved: Boolean(pendingAlbumKey),
           }
