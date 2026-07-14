@@ -5,12 +5,12 @@
  * Features:
  * - Filters messages from allowed groups only
  * - Batches media messages per group until a non-media message closes the batch
- * - Only queues album jobs when the closing message is a caption
+ * - Only queues album jobs when the closing message provides a product name
  */
 
 const { addMessageToBatch, closeBatchForGroup } = require('../utils/albumBatcher');
 const { shouldProcessMessage } = require('../utils/messageFilter');
-const { parseCaption } = require('../utils/captionParser');
+const { parseProductMessage } = require('../utils/productNameParser');
 const { albumProcessingQueue } = require('../utils/queues');
 
 /**
@@ -18,7 +18,7 @@ const { albumProcessingQueue } = require('../utils/queues');
  * - Filters messages from allowed groups only
  * - Checks for media content
  * - Batches media messages per group until closed by a non-media message
- * - Only queues album jobs when the closing message is a caption
+ * - Only queues album jobs when the closing message provides a product name
  *
  * @param {Object} msg - WhatsApp message
  * @param {Object} db - Supabase database handler
@@ -58,18 +58,21 @@ async function handleGroupMessage(msg, db, client) {
     console.log(`\n📨 Received message from allowed group: ${groupName} (${groupId})`);
 
     // Any text-only message closes the open album batch for this group.
-    // The batch is queued only if the message is a caption; otherwise it is
-    // discarded.
+    // The batch is queued only if the message provides a product name;
+    // otherwise it is discarded. The price is extracted for the image overlay.
     if (!msg.hasMedia) {
-      const caption = parseCaption(msg.body || '');
+      const parsed = parseProductMessage(msg.body || '');
+      const product_name = parsed?.product_name || null;
+      const priceText = parsed?.priceText || null;
 
-      if (caption) {
-        console.log(
-          `📝 Caption parsed -> brand: ${caption.brand || '(none)'} | price: ${caption.priceText || '(none)'} | bullets: ${caption.bullets.length}`
-        );
+      if (product_name) {
+        console.log(`📝 Product name parsed: ${product_name}`);
+      }
+      if (priceText) {
+        console.log(`💰 Price parsed: ${priceText}`);
       }
 
-      const closeResult = await closeBatchForGroup(groupId, caption);
+      const closeResult = await closeBatchForGroup(groupId, product_name, priceText);
 
       if (!closeResult.closed) {
         console.log(`⏭️ Message has no media and no open album batch exists, ignoring...`);
@@ -77,9 +80,9 @@ async function handleGroupMessage(msg, db, client) {
       }
 
       if (closeResult.queued) {
-        console.log(`✅ Album batch with caption queued for processing.`);
+        console.log(`✅ Album batch with product name queued for processing.`);
       } else {
-        console.log(`🗑️ Album batch closed and discarded - no caption found.`);
+        console.log(`🗑️ Album batch closed and discarded - no product name found.`);
       }
       return;
     }

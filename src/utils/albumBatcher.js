@@ -2,21 +2,21 @@
  * Album Batcher Utility
  * Handles batching of media messages per group. A batch stays open for a group
  * until any non-media message arrives in that group. The batch is then closed
- * and queued for processing ONLY if the closing message is a caption;
- * otherwise it is discarded.
+ * and queued for processing ONLY if the closing message provides a product
+ * name; otherwise it is discarded. The price extracted from the closing
+ * message is stored for the first image overlay.
  */
-
-const { parseCaption } = require('./captionParser');
 
 const albumBatches = new Map(); // Tracks open album batches per group
 
 /**
  * Build batch data and invoke the completion callback for a batch.
  * @param {Object} batch
- * @param {Object} caption
+ * @param {string} product_name
+ * @param {string|null} priceText
  * @returns {Promise<Object>} batchData
  */
-async function flushBatch(batch, caption) {
+async function flushBatch(batch, product_name, priceText = null) {
   const timestamp = batch.messages[0].timestamp;
 
   const batchData = {
@@ -27,7 +27,8 @@ async function flushBatch(batch, caption) {
     author: batch.author,
     messageBody: batch.messages[0].messageBody || '',
     albumSize: batch.messages.length,
-    caption,
+    product_name,
+    priceText,
   };
 
   console.log(
@@ -53,7 +54,7 @@ async function flushBatch(batch, caption) {
  * @param {string} messageData.groupName - Group name
  * @param {string} messageData.author - Message author
  * @param {number} messageData.timestamp - Message timestamp
- * @param {string} messageData.messageBody - Message body/caption
+ * @param {string} messageData.messageBody - Message body
  * @param {Function} onBatchComplete - Callback when batch is ready to queue
  */
 async function addMessageToBatch(messageData, onBatchComplete) {
@@ -88,15 +89,16 @@ async function addMessageToBatch(messageData, onBatchComplete) {
 /**
  * Close the open batch for a group.
  *
- * - If no caption is provided, the batch is deleted and discarded.
- * - If a caption is provided, the batch is added to the processing queue and
- *   then deleted.
+ * - If no product_name is provided, the batch is deleted and discarded.
+ * - If a product_name is provided, the batch is added to the processing queue
+ *   and then deleted.
  *
  * @param {string} groupId - Group ID whose batch should be closed
- * @param {Object|null} caption - Optional parsed caption from the closing message
+ * @param {string|null} product_name - Optional product name from the closing message
+ * @param {string|null} priceText - Optional price text from the closing message
  * @returns {Promise<{closed: boolean, queued: boolean, timestamp?: number}>}
  */
-async function closeBatchForGroup(groupId, caption = null) {
+async function closeBatchForGroup(groupId, product_name = null, priceText = null) {
   const batch = albumBatches.get(groupId);
 
   if (!batch) {
@@ -105,14 +107,14 @@ async function closeBatchForGroup(groupId, caption = null) {
 
   albumBatches.delete(groupId);
 
-  if (!caption) {
+  if (!product_name) {
     console.log(
-      `🗑️ Discarded album batch for ${batch.groupName} (${batch.messages.length} message(s)) - no caption found.`
+      `🗑️ Discarded album batch for ${batch.groupName} (${batch.messages.length} message(s)) - no product name found.`
     );
     return { closed: true, queued: false, timestamp: batch.messages[0].timestamp };
   }
 
-  const batchData = await flushBatch(batch, caption);
+  const batchData = await flushBatch(batch, product_name, priceText);
 
   return { closed: true, queued: true, timestamp: batchData.timestamp };
 }

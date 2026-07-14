@@ -35,10 +35,10 @@ function initializeAlbumWorker(client, db) {
     async (job) => {
       try {
         console.log(`\n🔄 [PARENT] Processing album job: ${job.name}`);
-        const { messageIds, groupId, groupName, timestamp, author, messageBody, albumSize, caption } = job.data;
+        const { messageIds, groupId, groupName, timestamp, author, messageBody, albumSize, product_name, priceText } = job.data;
 
-        if (!caption) {
-          console.log(`⚠️ [PARENT] Album job has no caption; skipping.`);
+        if (!product_name) {
+          console.log(`⚠️ [PARENT] Album job has no product_name; skipping.`);
           return {
             summary: {
               messageIds,
@@ -147,7 +147,8 @@ function initializeAlbumWorker(client, db) {
         await socialPostingQueue.add(jobName, {
           type: 'carousel',
           images,
-          caption,
+          product_name,
+          priceText,
           groupName,
           timestamp,
           messageBody,

@@ -10,7 +10,9 @@
 
 const { Worker } = require('bullmq');
 const Redis = require('ioredis');
-const { getRandomTemplate } = require('../services/tiktokPublisher');
+const { fal } = require('@fal-ai/client');
+const falPrompts = require('../config/falPrompts');
+const { getRandomFallbackResult } = require('../config/falFallbacks');
 const { buildDynamicTemplateUrl } = require('../services/cloudinaryClient');
 const { getScheduledPosts, getLatestScheduledPost, scheduleSocialPost } = require('../services/zernioClient');
 
@@ -66,6 +68,70 @@ function processDescription(description, groupName, timestamp) {
 }
 
 /**
+ * Generate post title and description via Fal AI.
+ * @param {string} imageUrl - Cloudinary URL of the first product image
+ * @param {string} productName - Product name to describe
+ * @returns {Promise<Object>} Fal workflow result JSON
+ */
+async function generateFalPostContent(imageUrl, productName) {
+  try {
+    const prompt = falPrompts.prompt.replace(/\${product_name}/g, productName);
+
+    const stream = await fal.stream(
+      'workflows/kelvinpella/kleva-post-title-and-description',
+      {
+        input: {
+          product: imageUrl,
+          prompt,
+          system_prompt: falPrompts.system_prompt,
+        },
+      }
+    );
+
+    for await (const event of stream) {
+      console.log(event);
+    }
+
+    const rawResult = await stream.done();
+
+    // Fal workflows often wrap the final JSON in nested output fields.
+    // Try the common nesting paths before falling back to the raw result.
+
+
+    const resultPayload =
+      rawResult?.output?.output ??
+      rawResult?.output ??
+      rawResult;
+
+    if (typeof resultPayload === "string") {
+      let text = resultPayload.trim();
+
+      // Try extracting fenced JSON
+      const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+      if (fenced) {
+        text = fenced[1].trim();
+      } else {
+        // Otherwise extract the first JSON object
+        const start = text.indexOf("{");
+        const end = text.lastIndexOf("}");
+        if (start !== -1 && end !== -1) {
+          text = text.slice(start, end + 1);
+        }
+      }
+
+      return JSON.parse(text);
+    }
+
+    return resultPayload;
+
+    return resultPayload;
+  } catch (err) {
+    console.error('❌ Fal AI workflow failed; using fallback result:', err.message);
+    return getRandomFallbackResult();
+  }
+}
+
+/**
  * Initialize the child worker for TikTok posting
  */
 function initializeSocialPostingWorker() {
@@ -78,22 +144,40 @@ function initializeSocialPostingWorker() {
     async (job) => {
       try {
         console.log(`\n🔄 [CHILD] Processing social post job: ${job.name}`);
-        const { type, images, caption, groupName, timestamp, messageBody } = job.data;
+        const { type, images, product_name, priceText, groupName, timestamp, messageBody } = job.data;
 
         if (!Array.isArray(images) || images.length === 0) {
           throw new Error('Missing images for social post');
         }
 
+        const firstImageUrl = images[0].originalUrl;
+
+        const falResult = await generateFalPostContent(firstImageUrl, product_name);
+        console.log('Fal AI result:', falResult);
+
+        const header = falResult?.on_screen?.header || '';
+        const bulletsString = falResult?.on_screen?.bullets || '';
+        const bullets = bulletsString
+          .split(',')
+          .map((b) => b.trim())
+          .filter(Boolean)
+          .slice(0, 3)
+          .map((b, i) => `${i + 1}. ${b}`);
+
         // Build the final carousel URLs:
-        // - Images 0 & 1 use their respective templates with caption text overlaid
-        // - Images 2+ use the shared transformation template (index 2) without text overlays
+        // - Image 0 uses the generated header and the price from the message
+        // - Image 1 uses the generated bullets
+        // - Images 2+ use the shared transformation template without text overlays
         const mediaUrls = images.map((image, i) =>
-          buildDynamicTemplateUrl(image.publicFileName, Math.min(i, 2), i < 2 ? caption || {} : {})
+          buildDynamicTemplateUrl(
+            image.publicFileName,
+            Math.min(i, 2),
+            i === 0 ? { brand: header, priceText } : i === 1 ? { bullets } : {}
+          )
         );
 
-        const template = getRandomTemplate();
-        const processedDescription = processDescription(template.description, groupName, timestamp);
-        const title = template.title || 'Kleva Pochi Kali';
+        const processedDescription = processDescription(falResult?.description || '', groupName, timestamp);
+        const title = falResult?.title || 'Kleva Pochi Kali';
         const now = new Date();
 
         console.log(`📝 [CHILD] Title: ${title}`);
