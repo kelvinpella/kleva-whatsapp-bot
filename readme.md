@@ -14,7 +14,7 @@ Enable handbag suppliers to:
 ## ✨ Core Features
 
 - **🔍 Automatic Group Monitoring** — Monitors WhatsApp supplier groups 24/7
-- **📦 Album Detection** — Batches media sent within 2-second window
+- **📦 Album Detection** — Batches media per group until a non-media message closes the batch, and only processes albums when the closing message is a caption
 - **⚡ Queue-Based Processing** — BullMQ with Redis for scalable message handling
 - **📤 Direct Publer Upload** — Upload media directly to Publer (no intermediary storage)
 - **🎬 TikTok Auto-Publishing** — Videos as individual posts, images as carousels
@@ -51,7 +51,7 @@ Enable handbag suppliers to:
 ## 📖 How It Works
 
 1. **Monitor** — Bot monitors allowed WhatsApp supplier groups
-2. **Detect** — Album detection batches media sent within 2 seconds
+2. **Detect** — Album detection batches media per group until a text-only message closes the batch
 3. **Queue** — Messages queued via BullMQ for scalable processing
 4. **Download** — Media downloaded from WhatsApp messages
 5. **Upload** — Direct upload to Publer (videos with original audio, images)
@@ -81,7 +81,7 @@ Date: Feb 15, 2026
 
 ## 📊 Performance Targets
 
-- Album detection: 2-second window
+- Album detection: closes when a non-media message arrives; only processed when the closing message is a caption
 - Media processing: < 10 seconds per message
 - Upload to Publer: < 5 seconds per file
 - TikTok publishing: 1.5-minute delays between posts

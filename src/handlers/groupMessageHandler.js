@@ -4,53 +4,21 @@
  *
  * Features:
  * - Filters messages from allowed groups only
- * - Detects albums (multiple media messages within 2-second window)
- * - Queues album jobs for processing via BullMQ
+ * - Batches media messages per group until a non-media message closes the batch
+ * - Only queues album jobs when the closing message provides a product name
  */
 
-const { Queue } = require('bullmq');
-const Redis = require('ioredis');
-const { addMessageToBatch } = require('../utils/albumBatcher');
+const { addMessageToBatch, closeBatchForGroup } = require('../utils/albumBatcher');
 const { shouldProcessMessage } = require('../utils/messageFilter');
-const { parseCaption } = require('../utils/captionParser');
-const { consumeLatestPendingAlbum } = require('../utils/pendingAlbums');
-
-// Initialize Redis connection
-// Uses REDIS_URL env var if available (production), otherwise defaults to localhost
-const redisConnection = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
-  maxRetriesPerRequest: null,
-});
-
-// Initialize BullMQ Queue for album processing jobs
-const albumProcessingQueue = new Queue('albumProcessing', {
-  connection: redisConnection, removeOnComplete:true,
-  removeOnFail: {
-    age: 2 * 24 * 3600 // keep failed jobs for 2 days
-  }
-});
-
-// Queue for social posting jobs, created once a caption is matched to an album
-const socialPostingQueue = new Queue('socialPosting', {
-  connection: redisConnection,
-  defaultJobOptions: {
-    attempts: 2,
-    backoff: {
-      type: 'exponential',
-      delay: 5000,
-    },
-    removeOnComplete: true,
-    removeOnFail: {
-      age: 4 * 3600 // remove failed jobs after 4 hours
-    }
-  }
-});
+const { parseProductMessage } = require('../utils/productNameParser');
+const { albumProcessingQueue } = require('../utils/queues');
 
 /**
  * Handle incoming group messages
  * - Filters messages from allowed groups only
  * - Checks for media content
- * - Detects albums (multiple media messages within 2-second window)
- * - Adds media messages to BullMQ queue for processing
+ * - Batches media messages per group until closed by a non-media message
+ * - Only queues album jobs when the closing message provides a product name
  *
  * @param {Object} msg - WhatsApp message
  * @param {Object} db - Supabase database handler
@@ -89,33 +57,33 @@ async function handleGroupMessage(msg, db, client) {
 
     console.log(`\n📨 Received message from allowed group: ${groupName} (${groupId})`);
 
-    // Text-only message: it may be the caption for a previously-posted album.
+    // Any text-only message closes the open album batch for this group.
+    // The batch is queued only if the message provides a product name;
+    // otherwise it is discarded. The price is extracted for the image overlay.
     if (!msg.hasMedia) {
-      const caption = parseCaption(msg.body || '');
-      if (!caption) {
-        console.log(`⏭️ Message has no media and is not a caption, ignoring...`);
+      const parsed = parseProductMessage(msg.body || '');
+      const product_name = parsed?.product_name || null;
+      const priceText = parsed?.priceText || null;
+
+      if (product_name) {
+        console.log(`📝 Product name parsed: ${product_name}`);
+      }
+      if (priceText) {
+        console.log(`💰 Price parsed: ${priceText}`);
+      }
+
+      const closeResult = await closeBatchForGroup(groupId, product_name, priceText);
+
+      if (!closeResult.closed) {
+        console.log(`⏭️ Message has no media and no open album batch exists, ignoring...`);
         return;
       }
 
-      console.log(`📝 Caption parsed -> brand: ${caption.brand || '(none)'} | price: ${caption.priceText || '(none)'} | bullets: ${caption.bullets.length}`);
-      console.log(`📝 Caption message detected; looking for a pending album in this group...`);
-      const pendingAlbum = await consumeLatestPendingAlbum(redisConnection, groupId);
-      if (!pendingAlbum) {
-        console.log(`⚠️ Caption received but no pending album found for group ${groupId}; ignoring.`);
-        return;
+      if (closeResult.queued) {
+        console.log(`✅ Album batch with product name queued for processing.`);
+      } else {
+        console.log(`🗑️ Album batch closed and discarded - no product name found.`);
       }
-
-      const jobName = `social-post-carousel-${groupId}-${Date.now()}`;
-      await socialPostingQueue.add(jobName, {
-        type: 'carousel',
-        images: pendingAlbum.images,
-        caption,
-        groupName: pendingAlbum.groupName || groupName,
-        timestamp: pendingAlbum.timestamp,
-        messageBody: pendingAlbum.messageBody,
-      });
-
-      console.log(`✅ Matched caption to album and created social post job: ${jobName}`);
       return;
     }
 
@@ -123,7 +91,7 @@ async function handleGroupMessage(msg, db, client) {
     console.log(`📸 Message contains media, adding to album batch...`);
 
     // Add message to batch with callback to queue when batch is complete
-    addMessageToBatch(
+    await addMessageToBatch(
       {
         messageId: msg.id._serialized,
         groupId,
@@ -134,7 +102,7 @@ async function handleGroupMessage(msg, db, client) {
       },
       async (batchData) => {
         // Create album processing job
-        // Parent worker will process media and create child jobs for each TikTok post
+        // Parent worker will process media and create the social post job
         const jobName = `processAlbum-${batchData.groupId}-${Date.now()}`;
 
         await albumProcessingQueue.add(jobName, batchData, {
