@@ -5,14 +5,16 @@
  * - Downloads all media from messages
  * - Categorizes and applies limits
  * - Uploads all selected images to Cloudinary
- * - Parks the uploaded images as a pending album in Redis until a caption
- *   message arrives (social posting is queued later by the caption handler)
+ * - Creates the social post job using the caption that was attached to the batch
+ *
+ * Jobs are only queued when a caption is available, so every job is expected
+ * to include one.
  */
 
 const { Worker } = require('bullmq');
 const Redis = require('ioredis');
 const { uploadImageToCloudinary } = require('../services/cloudinaryClient');
-const { savePendingAlbum } = require('../utils/pendingAlbums');
+const { socialPostingQueue } = require('../utils/queues');
 
 const MAX_VIDEOS = 2;
 const MAX_IMAGES = 10;
@@ -33,7 +35,20 @@ function initializeAlbumWorker(client, db) {
     async (job) => {
       try {
         console.log(`\n🔄 [PARENT] Processing album job: ${job.name}`);
-        const { messageIds, groupId, groupName, timestamp, author, messageBody, albumSize } = job.data;
+        const { messageIds, groupId, groupName, timestamp, author, messageBody, albumSize, caption } = job.data;
+
+        if (!caption) {
+          console.log(`⚠️ [PARENT] Album job has no caption; skipping.`);
+          return {
+            summary: {
+              messageIds,
+              groupId,
+              groupName,
+              totalImages: 0,
+              skipped: true,
+            }
+          };
+        }
 
         console.log(`📦 Processing album with ${messageIds.length} message(s)`);
 
@@ -69,7 +84,7 @@ function initializeAlbumWorker(client, db) {
 
         console.log(`📊 Album totals: ${allVideos.length} videos, ${allImages.length} images`);
 
-        // Apply limits 
+        // Apply limits
         // const limitedVideos = allVideos.slice(0, MAX_VIDEOS);
         const limitedImages = allImages.slice(0, MAX_IMAGES);
 
@@ -82,14 +97,10 @@ function initializeAlbumWorker(client, db) {
           console.log(`⚠️ Dropped ${allImages.length - MAX_IMAGES} images (max ${MAX_IMAGES})`);
         }
 
-        // Park the uploaded album in Redis until a caption message arrives.
-        let pendingAlbumKey = null;
-        let processedImagesCount = 0
+        let images = [];
 
         if (limitedImages.length > 0) {
           // Upload all limited images to Cloudinary in parallel; map preserves original order.
-          // Transformation/text overlays are applied later (once captions arrive), so here we
-          // only persist each image's public file name and original URL.
           console.log(`\n🌥️ Uploading all limited images to Cloudinary...`);
 
           const uploadResults = await Promise.all(
@@ -113,37 +124,44 @@ function initializeAlbumWorker(client, db) {
             })
           );
 
-          const images = uploadResults.filter(Boolean);
+          images = uploadResults.filter(Boolean);
 
           console.log(`\n✅ Image Processing Complete:`);
           console.log(`   - Total uploaded images: ${images.length}`);
-
-
-          if (images.length > 0) {
-            pendingAlbumKey = await savePendingAlbum(redisConnection, {
-              groupId,
-              groupName,
-              author,
-              timestamp,
-              messageBody,
-              images,
-            });
-            processedImagesCount = images.length;
-            console.log(`📥 [PARENT] Saved pending album (awaiting caption): ${pendingAlbumKey}`);
-          } else {
-            console.log(`⚠️ [PARENT] No images uploaded; nothing to park.`);
-          }
         }
 
+        if (images.length === 0) {
+          console.log(`⚠️ [PARENT] No images uploaded; nothing to post.`);
+          return {
+            summary: {
+              messageIds,
+              groupId,
+              groupName,
+              totalImages: 0,
+              skipped: false,
+            }
+          };
+        }
+
+        const jobName = `social-post-carousel-${groupId}-${Date.now()}`;
+        await socialPostingQueue.add(jobName, {
+          type: 'carousel',
+          images,
+          caption,
+          groupName,
+          timestamp,
+          messageBody,
+        });
+        console.log(`✅ [PARENT] Created social post job: ${jobName}`);
+
         return {
-          pendingAlbumKey,
           summary: {
             messageIds,
             groupId,
             groupName,
-            totalImages: processedImagesCount,
+            totalImages: images.length,
             droppedImages: Math.max(0, allImages.length - MAX_IMAGES),
-            pendingAlbumSaved: Boolean(pendingAlbumKey),
+            skipped: false,
           }
         };
 

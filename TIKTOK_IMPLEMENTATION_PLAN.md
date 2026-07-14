@@ -777,66 +777,54 @@ async function saveMediaToTemp(media, messageId) {
 WhatsApp sends album images as separate messages within ~1 second. Need to batch them:
 
 ```javascript
-// Track album batches
+// Track album batches per group
 const albumBatches = new Map()
-const ALBUM_WINDOW_MS = 2000  // 2 seconds to collect album
 
-async function handleTiktokUpload(msg, groupId, groupName) {
-  if (!config.supplierGroupIds.includes(groupId)) return
-  if (!msg.hasMedia) return
+function isCaption(text) {
+  // Caption detection logic (e.g. "Social Media: ..." or price block)
+  return Boolean(parseCaption(text))
+}
 
-  const batchKey = `${groupId}_${msg.timestamp}`
+async function handleGroupMessage(msg, groupId, groupName) {
+  if (!msg.hasMedia) {
+    // A non-media message closes the open batch for this group.
+    const batch = albumBatches.get(groupId)
+    if (!batch) return
 
-  try {
-    // Download media
-    const media = await msg.downloadMedia()
-    if (!media) return
+    albumBatches.delete(groupId)
 
-    const tempPath = await saveMediaToTemp(media, msg.id._serialized)
-
-    // Add to batch
-    if (!albumBatches.has(batchKey)) {
-      albumBatches.set(batchKey, {
-        mediaPaths: [],
-        groupId,
-        groupName,
-        timer: null
-      })
+    if (isCaption(msg.body || '')) {
+      await queueAlbumUpload(batch)
+    } else {
+      console.log('Discarding album batch - no caption provided.')
     }
-
-    const batch = albumBatches.get(batchKey)
-    batch.mediaPaths.push(tempPath)
-
-    // Clear existing timer
-    if (batch.timer) {
-      clearTimeout(batch.timer)
-    }
-
-    // Set new timer - queue after no new images for 2 seconds
-    batch.timer = setTimeout(async () => {
-      console.log(`📦 Album batch complete: ${batch.mediaPaths.length} items`)
-
-      await queueAlbumUpload({
-        mediaPaths: batch.mediaPaths,
-        groupId: batch.groupId,
-        groupName: batch.groupName,
-        messageId: msg.id._serialized,
-        timestamp: msg.timestamp
-      })
-
-      albumBatches.delete(batchKey)
-    }, ALBUM_WINDOW_MS)
-
-  } catch (error) {
-    console.error('Error handling TikTok upload:', error.message)
+    return
   }
+
+  // Media message: add to the open batch for this group.
+  if (!albumBatches.has(groupId)) {
+    albumBatches.set(groupId, {
+      mediaPaths: [],
+      groupId,
+      groupName,
+      messages: []
+    })
+  }
+
+  const media = await msg.downloadMedia()
+  if (!media) return
+
+  const tempPath = await saveMediaToTemp(media, msg.id._serialized)
+  const batch = albumBatches.get(groupId)
+  batch.mediaPaths.push(tempPath)
 }
 ```
 
 **Testing**:
-- [ ] Send single image in supplier group → queued
-- [ ] Send album (3 images) → batched and queued as one job
-- [ ] Send video → queued
+- [ ] Send single image in supplier group followed by caption → queued
+- [ ] Send album (3 images) followed by caption → batched and queued as one job
+- [ ] Send album followed by non-caption text → batch discarded
+- [ ] Send video followed by caption → queued
 - [ ] Send image in non-supplier group → ignored
 - [ ] Feature flag works (can switch between TikTok and image search)
 
