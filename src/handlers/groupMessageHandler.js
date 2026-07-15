@@ -14,6 +14,35 @@ const { parseProductMessage } = require('../utils/productNameParser');
 const { albumProcessingQueue } = require('../utils/queues');
 
 /**
+ * Extract a stable serialized message id from a WhatsApp Web.js message.
+ * In some message types the `_serialized` field is missing, so we fall back
+ * to assembling it from the raw MsgKey parts.
+ * @param {Object} msg
+ * @returns {string|null}
+ */
+function extractMessageId(msg) {
+  if (!msg || !msg.id) {
+    return null;
+  }
+
+  if (msg.id._serialized) {
+    return msg.id._serialized;
+  }
+
+  if (typeof msg.id === 'string') {
+    return msg.id;
+  }
+
+  const remote = msg.id.remote?._serialized || msg.id.remote;
+  const id = msg.id.id;
+  if (remote && id) {
+    return `${remote}_${msg.id.fromMe ? 'true' : 'false'}_${id}`;
+  }
+
+  return null;
+}
+
+/**
  * Handle incoming group messages
  * - Filters messages from allowed groups only
  * - Checks for media content
@@ -90,10 +119,16 @@ async function handleGroupMessage(msg, db, client) {
     // Message has media - add to album batch
     console.log(`📸 Message contains media, adding to album batch...`);
 
+    const messageId = extractMessageId(msg);
+    if (!messageId) {
+      console.error(`❌ Could not extract message id from media message; ignoring.`);
+      return;
+    }
+
     // Add message to batch with callback to queue when batch is complete
     await addMessageToBatch(
       {
-        messageId: msg.id._serialized,
+        messageId,
         groupId,
         groupName,
         author: msg.author || msg.from,

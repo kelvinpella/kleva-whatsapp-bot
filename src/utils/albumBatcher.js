@@ -61,6 +61,11 @@ async function addMessageToBatch(messageData, onBatchComplete) {
   const { messageId, groupId, groupName, author, timestamp, messageBody } = messageData;
   const batchKey = groupId;
 
+  if (!messageId) {
+    console.error(`❌ Refusing to add message to batch without a messageId`);
+    throw new Error('messageId is required to add a message to an album batch');
+  }
+
   // Get or create album batch for this group
   let batch = albumBatches.get(batchKey);
 
