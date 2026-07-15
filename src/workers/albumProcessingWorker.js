@@ -50,6 +50,10 @@ function initializeAlbumWorker(client, db) {
           };
         }
 
+        if (!Array.isArray(messageIds) || messageIds.length === 0 || messageIds.some(id => !id)) {
+          throw new Error(`Invalid messageIds in album job: ${JSON.stringify(messageIds)}`);
+        }
+
         console.log(`📦 Processing album with ${messageIds.length} message(s)`);
 
         // Arrays to collect all media from all messages
@@ -174,6 +178,11 @@ function initializeAlbumWorker(client, db) {
     {
       connection: redisConnection,
       concurrency: 1, // Process one album at a time to manage rate limits and resource usage
+      name: 'album-processing-parent',
+      removeOnComplete: true,
+      removeOnFail: {
+        age: 2 * 24 * 3600, // keep failed jobs for 2 days
+      },
     }
   );
 
